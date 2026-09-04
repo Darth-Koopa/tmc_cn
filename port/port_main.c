@@ -849,24 +849,23 @@ int main(int argc, char* argv[]) {
             if (Port_Config_GetConsoleParity()) {
                 char msg[512];
                 snprintf(msg, sizeof(msg),
-                         "Console-Parity requires a region-matched ROM: this build is %s but the "
-                         "ROM is %s.\n\n"
-                         "A version-mismatched hybrid is not console-equivalent. Use a %s ROM, or "
-                         "relaunch without Console-Parity.",
+                         "主机一致模式要求 ROM 与构建版本匹配：本构建为 %s，ROM 为 %s。\n\n"
+                         "版本不匹配的混合版本不等价于实机。请使用 %s 版 ROM，或 "
+                         "在关闭主机一致模式的情况下重新启动。",
                          compiledName, detectedName, compiledName);
-                Port_FatalRomError("Minish Cap PC Port - region mismatch", msg);
+                Port_FatalRomError("缩小帽 PC 移植版 - 版本与 ROM 区域不匹配", msg);
             }
             {
                 char msg[512];
                 snprintf(msg, sizeof(msg),
-                         "This build is %s but the ROM is %s.\n\n"
-                         "Graphics, text, and RNG may be wrong - the game runs as a hybrid that "
-                         "matches neither console version. Use a %s ROM for a faithful game.",
+                         "本构建为 %s，但 ROM 是 %s。\n\n"
+                         "图像、文本与随机数可能出错——游戏将以混合状态运行，"
+                         "与任何实机版本都不相符。使用 %s 版 ROM 可获得与原版一致的游戏体验。",
                          compiledName, detectedName, compiledName);
                 fprintf(stderr, "WARNING: %s\n", msg);
                 fflush(stderr);
 #ifndef TMC_N64
-                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Minish Cap PC Port - region mismatch", msg, window);
+                SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "缩小帽 PC 移植版 - 版本与 ROM 区域不匹配", msg, window);
 #endif
             }
         }

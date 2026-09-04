@@ -358,7 +358,7 @@ void Port_DiscordRpc_Update(const char* area_name,
     }
     if (!EnsureConnected()) return;
 
-    if (!area_name || !area_name[0]) area_name = "Adventuring";
+    if (!area_name || !area_name[0]) area_name = "冒险中";
 
     /* JSON-escape the area name in case it ever contains chars that
      * would break the payload (quotes, backslashes, control bytes). */
@@ -368,7 +368,7 @@ void Port_DiscordRpc_Update(const char* area_name,
     /* state_line is built from integers via snprintf — no escape needed. */
     char state_line[128];
     snprintf(state_line, sizeof(state_line),
-             "%d/%d hearts · %d rupees",
+             "%d/%d 心 · %d 卢比",
              hearts_now, hearts_max, rupees);
 
     char activity[768];
@@ -379,7 +379,7 @@ void Port_DiscordRpc_Update(const char* area_name,
                 "\"details\":\"%s\","
                 "\"state\":\"%s\","
                 "\"timestamps\":{\"start\":%llu},"
-                "\"assets\":{\"large_image\":\"minishcap\",\"large_text\":\"The Minish Cap\"}"
+                "\"assets\":{\"large_image\":\"minishcap\",\"large_text\":\"塞尔达传说 缩小帽\"}"
             "}"
         "}}",
         (unsigned long long)now,
