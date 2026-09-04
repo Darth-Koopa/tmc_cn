@@ -14,6 +14,13 @@
 #pragma once
 #include "port_types.h"
 
+/* The JP font system uses the high nibble of the character code as a
+ * font-bank selector. Retail JP needs 9 banks; the Angel Chinese patch
+ * supplies 16 banks at its replacement font table. Keep this as the
+ * host-side capacity so PC_PORT can represent the full GBA lookup range. */
+#define TMC_RETAIL_FONT_BANK_COUNT 9
+#define TMC_FONT_BANK_COUNT 16
+
 /* ---- ROM region enum ---- */
 typedef enum {
     ROM_REGION_UNKNOWN = 0,
@@ -82,9 +89,6 @@ extern const RomOffsets* gRomOffsets;
 /* ---- Predefined offset tables ---- */
 extern const RomOffsets kRomOffsets_USA;
 extern const RomOffsets kRomOffsets_EU;
-/* JP table is a placeholder until generated from build/JP/tmc_jp.map — its
- * ROM-derived address fields are 0. Port_DetectRomRegion refuses to run a JP
- * build against it while unpopulated. See docs/JP_PORT_ENABLEMENT.md. */
 extern const RomOffsets kRomOffsets_JP;
 
 /* Detect region from loaded ROM data and set gRomRegion + gRomOffsets.

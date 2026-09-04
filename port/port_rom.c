@@ -418,6 +418,55 @@ int gActiveRegion = TMC_REGION_USA;
 #endif
 const RomOffsets* gRomOffsets = NULL;
 
+/* Active JP-derived ROM hack profile. Angel's Chinese patch keeps the retail
+ * JP game code (BZMJ), but relocates the text/font pointer tables and adds
+ * font banks 9..15. Keep the retail JP profile intact and make a shallow
+ * runtime copy only when this ROM layout is detected. */
+static RomOffsets sRomOffsets_AngelChinese;
+static bool32 Port_IsAngelChineseRom(const u8* romData, u32 romSize);
+
+int Port_GetFontBankCount(void) {
+    if (gRomOffsets == &sRomOffsets_AngelChinese)
+        return TMC_FONT_BANK_COUNT;
+    /* Be robust against any later code that swaps gRomOffsets back to the
+     * retail JP profile: the ROM itself is authoritative for this hack. */
+    if (gRomData != NULL && Port_IsAngelChineseRom(gRomData, gRomSize))
+        return TMC_FONT_BANK_COUNT;
+    return TMC_RETAIL_FONT_BANK_COUNT;
+}
+
+bool32 Port_IsAngelChineseRomActive(void) {
+    return (gRomOffsets == &sRomOffsets_AngelChinese) ||
+           (gRomData != NULL && Port_IsAngelChineseRom(gRomData, gRomSize));
+}
+
+static bool32 Port_IsAngelChineseRom(const u8* romData, u32 romSize) {
+    if (romData == NULL || romSize < 0xE4F000u + 346u)
+        return FALSE;
+
+    /* Translation pointer relocated by the patch. */
+    if (Port_ReadU32(&romData[0x108ED8u]) != 0x08DCA000u)
+        return FALSE;
+
+    /* Replacement 16-entry font-bank table at ROM 0xDC9F00. */
+    if (Port_ReadU32(&romData[0xDC9F00u + 0x00u]) != 0x08692C00u ||
+        Port_ReadU32(&romData[0xDC9F00u + 0x10u]) != 0x08E00000u ||
+        Port_ReadU32(&romData[0xDC9F00u + 0x3Cu]) != 0x08E50000u)
+        return FALSE;
+
+    /* Replacement glyph mapping begins with the known JP/CN signature:
+     * FF FF, 1A 02, 10 02 ... at ROM 0xE4F000. */
+    if (romData[0xE4F000u + 0] != 0xFF ||
+        romData[0xE4F000u + 1] != 0xFF ||
+        romData[0xE4F000u + 2] != 0x1A ||
+        romData[0xE4F000u + 3] != 0x02 ||
+        romData[0xE4F000u + 4] != 0x10 ||
+        romData[0xE4F000u + 5] != 0x02)
+        return FALSE;
+
+    return TRUE;
+}
+
 /* USA offsets (from build/USA/tmc.map) */
 const RomOffsets kRomOffsets_USA = {
     .gfxAndPalettes = 0x5A2E80,
@@ -594,6 +643,13 @@ RomRegion Port_DetectRomRegion(const u8* romData, u32 romSize) {
                                "docs/JP_PORT_ENABLEMENT.md for the JP status.");
         }
         gRomOffsets = &kRomOffsets_JP;
+
+        if (Port_IsAngelChineseRom(romData, romSize)) {
+            sRomOffsets_AngelChinese = kRomOffsets_JP;
+            sRomOffsets_AngelChinese.text09248 = 0xDC9F00u;
+            sRomOffsets_AngelChinese.text092D4 = 0xE4F000u;
+            gRomOffsets = &sRomOffsets_AngelChinese;
+        }
 #else
         /* JP ROM fed to a single-region non-JP binary: code/data version
          * mismatch. Keep USA offsets so the region cross-check in port_main.c
@@ -1586,11 +1642,18 @@ void Port_LoadRom(const char* path) {
     }
 #endif
 
-    /* gUnk_08109248 — resolved from active ROM */
-    for (int i = 0; i < 9; i++) {
+    /* gUnk_08109248 — resolved from the active ROM.
+     * Retail ROMs have 9 entries here. The Angel Chinese patch replaces this
+     * table with 16 entries, so only that profile reads entries 9..15. */
+    const int fontBankCount = Port_GetFontBankCount();
+    for (int i = 0; i < TMC_FONT_BANK_COUNT; i++) {
+        gUnk_08109248[i] = NULL;
+    }
+    for (int i = 0; i < fontBankCount; i++) {
         gUnk_08109248[i] = Port_UnpackRomDataPtr(&gRomData[R->text09248], i);
     }
-    fprintf(stderr, "gUnk_08109248 font tables loaded (9 entries from active ROM).\n");
+    fprintf(stderr, "gUnk_08109248 font tables loaded (%d entries from active ROM).\n",
+            fontBankCount);
 
     /* gUnk_081092AC — resolved from active ROM */
     for (int i = 0; i < 10; i++) {
@@ -1821,6 +1884,17 @@ void Port_ApplyLanguage(void) {
     static int sLastAppliedPref = -2; /* -2 = never applied */
     if (!gSaveHeader)
         return;
+
+    /* Angel's Chinese ROM is a JP-based ROM hack. On real hardware it uses
+     * language == 0, which is significant because sub_0805F9A0() enables the
+     * ROM's Chinese character-to-glyph mapping only for LANGUAGE_JP. The PC
+     * port may otherwise retain an English save/config language even though
+     * the ROM text itself correctly falls back to the JP/ROM translation. */
+    if (Port_IsAngelChineseRomActive()) {
+        sLastAppliedPref = -1;
+        gSaveHeader->language = 0; /* LANGUAGE_JP */
+        return;
+    }
 
     int lang = Port_Config_PreferredLanguage();
     if (lang == sLastAppliedPref && lang >= 0)

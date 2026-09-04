@@ -360,24 +360,48 @@ u32 GetCharacter(Token* token) {
                 code = 1;
                 break;
             case 0xb:
-                code = sub_0805EF8C(token);
-                code |= 0x400;
-                break;
             case 0xc:
-                code = sub_0805EF8C(token);
-                code |= 0x700;
-                break;
             case 0xd:
-                code = sub_0805EF8C(token);
-                code |= 0x500;
-                break;
             case 0xe:
-                code = sub_0805EF8C(token);
-                code |= 0x600;
-                break;
             case 0xf:
-                code = sub_0805EF8C(token);
-                code |= 0x300;
+#ifdef PC_PORT
+                if (Port_IsAngelChineseRomActive()) {
+                    /* Angel uses the existing 0xB..0xE prefixes for the
+                     * first four Chinese font banks.  0xF is an escape for
+                     * the remaining character space: the following byte
+                     * selects either bank 2, bank 3, or (for >= 0x40) one of
+                     * the high-numbered banks and supplies a second byte.
+                     *
+                     * This is important for sequences such as:
+                     *   0F 02 -> 0x0202 (opening quote)
+                     *   0F 03 -> 0x0203 (closing quote)
+                     *   0F 40 93 -> 0x0993 (吞)
+                     *
+                     * Treating every 0xB..0xF prefix as a simple bank selector
+                     * makes the last two cases become 0x0802/0x0840 and causes
+                     * the renderer to read the wrong glyphs. */
+                    if (code == 0xf) {
+                        u32 selector = sub_0805EF8C(token);
+                        if (selector <= 0x2f) {
+                            code = 0x0200 | selector;
+                        } else if (selector <= 0x3f) {
+                            code = 0x0300 | (selector & 0x0f);
+                        } else {
+                            code = ((selector & 0x0f) + 9) << 8;
+                            code |= sub_0805EF8C(token);
+                        }
+                    } else {
+                        code = ((code & 7) + 1) << 8;
+                        code |= sub_0805EF8C(token);
+                    }
+                } else
+#endif
+                {
+                    static const u16 kRetailBanks[5] = {0x400, 0x700, 0x500, 0x600, 0x300};
+                    u32 idx = code - 0xb;
+                    code = sub_0805EF8C(token);
+                    code |= kRetailBanks[idx];
+                }
                 break;
             default:
                 code += 0x100;
@@ -401,6 +425,11 @@ u32 GetCharacter(Token* token) {
 u32* sub_0805F25C(u32 param_1) {
     u32 uVar1;
     u32 lang = gSaveHeader->language;
+#ifdef PC_PORT
+    const bool32 angelChinese = Port_IsAngelChineseRomActive();
+#else
+    const bool32 angelChinese = FALSE;
+#endif
 
 #ifdef PC_PORT
     if (lang >= NUM_LANGUAGES || gTranslations[lang] == NULL) {
@@ -427,23 +456,35 @@ u32* sub_0805F25C(u32 param_1) {
             break;
         case 2:
         case 3:
-        case 4:
             break;
+        case 4:
         case 5:
         case 6:
         case 7:
         case 8:
-            param_1 = param_1 << 1;
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+            if (angelChinese) {
+                param_1 = param_1 << 1;
+            } else if (uVar1 >= 5 && uVar1 <= 8) {
+                param_1 = param_1 << 1;
+            }
             break;
     }
     {
 #ifdef PC_PORT
-        /* Bank nibble comes from the text stream (ROM/asset/mod data); the
-         * switch handles banks 0..8 and gUnk_08109248 has exactly 9 host
-         * entries. GBA read adjacent ROM for 9..15; on PC that's a garbage
-         * host pointer — clamp to bank 0. */
+        /* The character's high nibble selects one of up to 16 font banks.
+         * Retail JP uses nine banks, while the Angel Chinese patch installs
+         * a 16-entry replacement table.  The old PC-only clamp of banks 9..15
+         * was an emulator-side workaround and makes Chinese glyphs resolve
+         * against bank 0 instead of their actual ROM font bank. */
         u32* result;
-        if (uVar1 >= 9) {
+        if (uVar1 >= (u32)Port_GetFontBankCount() || gUnk_08109248[uVar1] == NULL) {
             uVar1 = 0;
         }
         result = gUnk_08109248[uVar1] + param_1 * 0x10;
@@ -520,7 +561,12 @@ u32 GetFontStrWith(Token* param_1, u32 param_2) {
                 default:
                     if (uVar5 == 0) {
                         puVar2 = (u32*)sub_0805F25C(character);
-                        if (4 < character >> 8) {
+#ifdef PC_PORT
+                        const u32 doubleWidthBankThreshold = Port_IsAngelChineseRomActive() ? 2 : 4;
+#else
+                        const u32 doubleWidthBankThreshold = 4;
+#endif
+                        if (doubleWidthBankThreshold < character >> 8) {
                             uVar3 = sub_0805F7A0(puVar2[0x10]);
                             uVar4 += (uVar3 >> 8);
                         }
@@ -788,7 +834,12 @@ u32 sub_0805F7DC(u32 r0, WStruct* r1) {
 
     offset = sub_0805F25C(r0);
     temp = r1->unk6;
-    if ((r0 >> 8) > 4) {
+#ifdef PC_PORT
+    const u32 doubleWidthBankThreshold = Port_IsAngelChineseRomActive() ? 2 : 4;
+#else
+    const u32 doubleWidthBankThreshold = 4;
+#endif
+    if ((r0 >> 8) > doubleWidthBankThreshold) {
         sub_0805F820(r1, offset);
         offset += 0x10;
     }
@@ -910,10 +961,16 @@ void sub_0805F918(u32 idx, u32 idx2, void* dest) {
 }
 
 u32 sub_0805F9A0(u32 r0) {
-    if (gSaveHeader->language == 0) {
+#ifdef PC_PORT
+    /* Angel CN uses the JP code path for glyph remapping. Do not let the
+     * PC language/config state disable this ROM-provided table. */
+    const bool32 useAngelMap = Port_IsAngelChineseRomActive();
+#else
+    const bool32 useAngelMap = FALSE;
+#endif
+    if (gSaveHeader->language == 0 || useAngelMap) {
         u16* val = (u16*)gUnk_081092D4;
         u32 i = 0;
-
         do {
             if (*val == r0) {
                 return i + 0x800;
