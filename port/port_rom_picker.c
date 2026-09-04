@@ -500,7 +500,7 @@ int Port_RomPicker_PromptAndInstall(void) {
                  "  EU        cff199b36ff173fb6faf152653d1bccf87c26fb7\n"
                  "  JP        6c5404a1effb17f481f352181d0f1c61a2765c5d\n"
                  "  USA Demo  63fcad218f9047b6a9edbb68c98bd0dec322d7a1\n"
-                 "  JP Demo   9cdb56fa79bba13158b81925c1f3641251326412\n
+                 "  JP Demo   9cdb56fa79bba13158b81925c1f3641251326412\n"
                  "  Angel SP4 ba04cfbe93d12d2ad684c52234472fa12a5b53d7\n\n"
                  "若你的 ROM 哈希在上面的列表之中但这里仍然拒绝，\n"
                  "说明磁盘上的文件数据已被改动或损坏。",
