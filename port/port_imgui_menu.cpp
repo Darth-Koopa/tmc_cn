@@ -100,6 +100,75 @@ static bool sRibbonEnabled = true; /* Office-style ribbon at top */
 static SDL_Window* sWindow = nullptr;
 static SDL_Renderer* sRenderer = nullptr;
 
+/* ------------------------------------------------------------------
+ * CJK UI font support (中文界面字形).
+ *
+ * The ImGui default face (ProggyClean) carries no Han glyphs, so the
+ * Chinese port UI would render as tofu boxes. At ImGui init time we
+ * try to swap the default face for a system CJK font, probing
+ * well-known per-platform paths. The first loadable file wins.
+ *
+ * TMC_CJK_FONT=<path> overrides the probe list entirely (useful for
+ * portable installs or systems whose fonts live somewhere unusual).
+ *
+ * Note: the bundled stb_truetype only supports TrueType "glyf"
+ * outlines, so CFF-flavoured .otf files (e.g. the Noto Sans CJK OTF
+ * release) are deliberately NOT probed - they cannot be parsed.
+ * .ttc collections are fine (first face is used).
+ * ------------------------------------------------------------------ */
+static bool LoadCjkUiFont(ImGuiIO& io) {
+    static const char* const kCandidates[] = {
+        /* Windows (TrueType outlines; .ttc collections OK) */
+        "C:\\Windows\\Fonts\\msyh.ttc",          /* Microsoft YaHei */
+        "C:\\Windows\\Fonts\\msyhbd.ttc",
+        "C:\\Windows\\Fonts\\simhei.ttf",        /* SimHei */
+        "C:\\Windows\\Fonts\\simsun.ttc",        /* SimSun */
+        "C:\\Windows\\Fonts\\Deng.ttf",          /* DengXian */
+        /* macOS */
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        /* Linux / BSD desktops */
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+        /* Android */
+        "/system/fonts/NotoSansCJK-Regular.ttc",
+        "/system/fonts/DroidSansFallback.ttf",
+    };
+
+    /* Match the default ProggyClean pixel size so the existing
+     * io.FontGlobalScale (1.4x desktop / 2.0x Android) keeps every
+     * layout metric unchanged - only the glyph source is swapped. */
+    const float kCjkFontPx = 13.0f;
+
+    const char* envPath = SDL_getenv("TMC_CJK_FONT");
+    if (envPath && envPath[0]) {
+        ImFont* font = io.Fonts->AddFontFromFileTTF(envPath, kCjkFontPx);
+        if (font) {
+            io.FontDefault = font;
+            fprintf(stderr, "[imgui] CJK UI font: %s (TMC_CJK_FONT)\n", envPath);
+            return true;
+        }
+        fprintf(stderr, "[imgui] TMC_CJK_FONT=%s could not be loaded\n", envPath);
+    }
+
+    for (const char* candidate : kCandidates) {
+        ImFont* font = io.Fonts->AddFontFromFileTTF(candidate, kCjkFontPx);
+        if (font) {
+            io.FontDefault = font;
+            fprintf(stderr, "[imgui] CJK UI font: %s\n", candidate);
+            return true;
+        }
+    }
+    return false;
+}
+
 extern "C" void Port_ImGui_Init(SDL_Window* window, SDL_Renderer* renderer) {
     if (sImGuiInited)
         return;
@@ -122,6 +191,14 @@ extern "C" void Port_ImGui_Init(SDL_Window* window, SDL_Renderer* renderer) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; /* don't write imgui.ini next to binary */
+    /* The PC port UI is rendered in Simplified Chinese; the bundled
+     * ImGui font cannot show Han glyphs, so prefer a system CJK face.
+     * On failure we warn once and keep the default face. */
+    if (!LoadCjkUiFont(io)) {
+        fprintf(stderr,
+                "[imgui] WARNING: no loadable CJK system font found - Chinese UI text "
+                "will show as boxes; set TMC_CJK_FONT to a TrueType .ttf/.ttc to override\n");
+    }
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     /* Gamepad nav so Steam Deck users (and anyone on a controller) can
      * drive the menu without keyboard/mouse. SDL3 backend forwards the
@@ -511,7 +588,7 @@ static void DrawRibbonItemToggles(void) {
 /* Stable per-frame label for dungeon id d, marking the current dungeon. */
 static const char* DungeonLabel(int d, int cur) {
     static char buf[40];
-    snprintf(buf, sizeof(buf), "Dungeon %d%s", d, (d == cur) ? "  (current)" : "");
+    snprintf(buf, sizeof(buf), "迷宫 %d%s", d, (d == cur) ? "（当前）" : "");
     return buf;
 }
 
@@ -525,7 +602,7 @@ static void DrawRibbonDungeonItems(void) {
         sDungeon = 0;
 
     ImGui::SetNextItemWidth(180);
-    if (ImGui::BeginCombo("Dungeon", DungeonLabel(sDungeon, cur))) {
+    if (ImGui::BeginCombo("迷宫", DungeonLabel(sDungeon, cur))) {
         for (int d = 0; d < 16; ++d) {
             const bool sel = (d == sDungeon);
             ImGui::PushID(d);
@@ -539,7 +616,7 @@ static void DrawRibbonDungeonItems(void) {
     }
     if (cur >= 0) {
         ImGui::SameLine();
-        if (ImGui::SmallButton("Jump to current"))
+        if (ImGui::SmallButton("跳到当前迷宫"))
             sDungeon = cur;
     }
 
@@ -547,18 +624,18 @@ static void DrawRibbonDungeonItems(void) {
     bool map = (bits & 0x1) != 0;
     bool comp = (bits & 0x2) != 0;
     bool big = (bits & 0x4) != 0;
-    if (ImGui::Checkbox("Map", &map))
+    if (ImGui::Checkbox("地图", &map))
         Port_DebugAction_SetDungeonItem(sDungeon, 0, map);
     ImGui::SameLine();
-    if (ImGui::Checkbox("Compass", &comp))
+    if (ImGui::Checkbox("罗盘", &comp))
         Port_DebugAction_SetDungeonItem(sDungeon, 1, comp);
     ImGui::SameLine();
-    if (ImGui::Checkbox("Big Key", &big))
+    if (ImGui::Checkbox("大钥匙", &big))
         Port_DebugAction_SetDungeonItem(sDungeon, 2, big);
 
     int keys = Port_DebugQuery_DungeonKeys(sDungeon);
     ImGui::SetNextItemWidth(120);
-    if (ImGui::InputInt("Small keys", &keys)) {
+    if (ImGui::InputInt("小钥匙", &keys)) {
         if (keys < 0)
             keys = 0;
         if (keys > 255)
@@ -580,24 +657,24 @@ static void DrawTimedBuff(const char* label, const char* lname, const char* appl
                           int count, int* sel, int* frames, PortBuffApplyFn apply, PortBuffQueryFn query) {
     char tag[32];
     ImGui::SetNextItemWidth(200);
-    std::snprintf(tag, sizeof(tag), "%s type", label);
+    std::snprintf(tag, sizeof(tag), "%s 类型", label);
     ImGui::Combo(tag, sel, names, count);
     ImGui::SetNextItemWidth(200);
-    std::snprintf(tag, sizeof(tag), "%s frames", label);
+    std::snprintf(tag, sizeof(tag), "%s 持续帧数", label);
     ImGui::SliderInt(tag, frames, 0, 65535, "%d", ImGuiSliderFlags_Logarithmic);
     ImGui::SameLine();
-    std::snprintf(tag, sizeof(tag), "Apply##%s", applyId);
+    std::snprintf(tag, sizeof(tag), "应用##%s", applyId);
     if (ImGui::Button(tag)) {
         apply(ids[*sel], *frames);
         char toast[40];
-        std::snprintf(toast, sizeof(toast), "%s %s", label, *sel == 0 ? "cleared" : "applied");
+        std::snprintf(toast, sizeof(toast), "%s %s", label, *sel == 0 ? "已清除" : "已生效");
         Port_DebugMenu_ToastFromExternal(toast);
     }
     int id = 0, timer = 0;
     if (query(&id, &timer))
-        ImGui::TextDisabled("%s active: id %d, %d frames (%.1fs left)", lname, id, timer, timer / 60.0f);
+        ImGui::TextDisabled("%s 生效中：id %d，%d 帧（约剩 %.1f 秒）", lname, id, timer, timer / 60.0f);
     else
-        ImGui::TextDisabled("%s: inactive", lname);
+        ImGui::TextDisabled("%s：未生效", lname);
 }
 
 /* Charm + Picolyte activator. The combo + slider compose a buff to apply on
@@ -609,12 +686,12 @@ static void DrawRibbonBuffs(void) {
     static const int kCharmIds[] = { 0, BOTTLE_CHARM_NAYRU, BOTTLE_CHARM_FARORE, BOTTLE_CHARM_DIN };
     static int sCharmSel = 1;
     static int sCharmFrames = 3600;
-    DrawTimedBuff("Charm", "charm", "charm", kCharmNames, kCharmIds, IM_ARRAYSIZE(kCharmNames), &sCharmSel,
+    DrawTimedBuff("Charm", "Charm", "charm", kCharmNames, kCharmIds, IM_ARRAYSIZE(kCharmNames), &sCharmSel,
                   &sCharmFrames, Port_DebugAction_SetCharm, Port_DebugQuery_Charm);
 
     ImGui::Spacing();
 
-    static const char* kPicoNames[] = { "Off", "Red", "Orange", "Yellow", "Green", "Blue", "White" };
+    static const char* kPicoNames[] = { "关闭", "红", "橙", "黄", "绿", "蓝", "白" };
     static const int kPicoIds[] = { 0,
                                     ITEM_BOTTLE_PICOLYTE_RED,
                                     ITEM_BOTTLE_PICOLYTE_ORANGE,
@@ -624,7 +701,7 @@ static void DrawRibbonBuffs(void) {
                                     ITEM_BOTTLE_PICOLYTE_WHITE };
     static int sPicoSel = 1;
     static int sPicoFrames = 900;
-    DrawTimedBuff("Picolyte", "picolyte", "pico", kPicoNames, kPicoIds, IM_ARRAYSIZE(kPicoNames), &sPicoSel,
+    DrawTimedBuff("Picolyte", "Picolyte", "pico", kPicoNames, kPicoIds, IM_ARRAYSIZE(kPicoNames), &sPicoSel,
                   &sPicoFrames, Port_DebugAction_SetPicolyte, Port_DebugQuery_Picolyte);
 }
 
@@ -653,7 +730,7 @@ static void DrawRibbonBottles(void) {
         const bool owned = Port_DebugQuery_BottleOwned(b) != 0;
         const int curIdx = Port_DebugQuery_BottleContentIndex(Port_DebugQuery_BottleContent(b));
         char label[16];
-        snprintf(label, sizeof(label), "Bottle %d", b + 1);
+        snprintf(label, sizeof(label), "瓶子 %d", b + 1);
         ImGui::SetNextItemWidth(200);
         if (ImGui::BeginCombo(label, Port_DebugQuery_BottleContentName(curIdx))) {
             for (int i = 0; i < nContents; ++i) {
@@ -668,7 +745,7 @@ static void DrawRibbonBottles(void) {
         }
         if (!owned) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(not owned — pick to grant)");
+            ImGui::TextDisabled("（未拥有——选择后自动获得）");
         }
         ImGui::PopID();
     }
@@ -676,19 +753,19 @@ static void DrawRibbonBottles(void) {
 
 static void DrawRibbonItemsTab(void) {
     if (ImGui::BeginTable("##items_tab_table", 2, ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn("Stats & Unlocks", ImGuiTableColumnFlags_WidthFixed, 220.0f);
-        ImGui::TableSetupColumn("Recovery & Cheats", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("数值与解锁", ImGuiTableColumnFlags_WidthFixed, 220.0f);
+        ImGui::TableSetupColumn("恢复与作弊", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        ImGui::SeparatorText("Stats & Unlocks");
-        if (ImGui::Button("Unlock all items", ImVec2(200, 0))) {
+        ImGui::SeparatorText("数值与解锁");
+        if (ImGui::Button("解锁全部道具", ImVec2(200, 0))) {
             Port_DebugAction_GiveAllItems();
-            Port_DebugMenu_ToastFromExternal("All items granted");
+            Port_DebugMenu_ToastFromExternal("全部道具已给予");
         }
-        if (ImGui::Button("All kinstones fused", ImVec2(200, 0))) {
+        if (ImGui::Button("Kinstone 全部融合", ImVec2(200, 0))) {
             Port_DebugAction_AllKinstones();
-            Port_DebugMenu_ToastFromExternal("All kinstones");
+            Port_DebugMenu_ToastFromExternal("Kinstone 全部完成");
         }
         if (ImGui::Button("All figurines (130)", ImVec2(200, 0))) {
             Port_DebugAction_AllFigurines130();
@@ -700,43 +777,43 @@ static void DrawRibbonItemsTab(void) {
         }
 
         ImGui::TableSetColumnIndex(1);
-        ImGui::SeparatorText("Recovery & Cheats");
-        if (ImGui::Button("Heal", ImVec2(120, 0))) {
+        ImGui::SeparatorText("恢复与作弊");
+        if (ImGui::Button("回复", ImVec2(120, 0))) {
             Port_DebugAction_HealFull();
-            Port_DebugMenu_ToastFromExternal("Healed");
+            Port_DebugMenu_ToastFromExternal("已回复");
         }
         ImGui::SameLine();
-        if (ImGui::Button("Max hearts", ImVec2(120, 0))) {
+        if (ImGui::Button("最大生命", ImVec2(120, 0))) {
             Port_DebugAction_MaxHearts();
-            Port_DebugMenu_ToastFromExternal("Hearts maxed");
+            Port_DebugMenu_ToastFromExternal("生命已加满");
         }
-        if (ImGui::Button("999 rupees", ImVec2(120, 0))) {
+        if (ImGui::Button("卢比 999", ImVec2(120, 0))) {
             Port_DebugAction_MaxRupees();
-            Port_DebugMenu_ToastFromExternal("999 rupees");
+            Port_DebugMenu_ToastFromExternal("卢比 999");
         }
         ImGui::SameLine();
-        if (ImGui::Button("999 shells", ImVec2(120, 0))) {
+        if (ImGui::Button("贝壳 999", ImVec2(120, 0))) {
             Port_DebugAction_MaxShells();
-            Port_DebugMenu_ToastFromExternal("999 shells");
+            Port_DebugMenu_ToastFromExternal("贝壳 999");
         }
 
         ImGui::EndTable();
     }
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Per-item toggle");
+    ImGui::SeparatorText("逐项道具开关");
     DrawRibbonItemToggles();
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Dungeon items (any dungeon)");
+    ImGui::SeparatorText("迷宫道具（任意迷宫）");
     DrawRibbonDungeonItems();
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Counts & capacities");
+    ImGui::SeparatorText("数量与容量");
     DrawRibbonStats();
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Bottle contents");
+    ImGui::SeparatorText("瓶子内容");
     DrawRibbonBottles();
 
     ImGui::Spacing();
@@ -827,26 +904,26 @@ static void DoQuitToTitle(bool saveFirst) {
 }
 static bool DrawRegionLanguageControls(bool prelaunch) {
     bool regionChanged = false;
-    ImGui::SeparatorText("ROM Region & Language");
+    ImGui::SeparatorText("ROM 区域与语言");
 
     int preferredRegion = Port_Config_PreferredRegion();
     if (preferredRegion < -1 || preferredRegion > 2)
         preferredRegion = -1;
 
     const char* regionNames[] = {
-        "Auto (Use first valid ROM)",
-        "USA (baserom.gba)",
-        "EU (baserom_eu.gba)",
-        "JP (baserom_jp.gba)",
+        "自动（使用首个有效 ROM）",
+        "USA（baserom.gba）",
+        "EU（baserom_eu.gba）",
+        "JP（baserom_jp.gba）",
     };
     int regionIdx = preferredRegion + 1; // map -1..2 to 0..3
     ImGui::SetNextItemWidth(270);
-    if (ImGui::Combo("Preferred ROM", &regionIdx, regionNames, 4)) {
+    if (ImGui::Combo("首选 ROM", &regionIdx, regionNames, 4)) {
         Port_Config_SetPreferredRegion(regionIdx - 1);
         regionChanged = true;
     }
     ImGui::SameLine();
-    ImGui::TextDisabled(prelaunch ? "(used when Play starts)" : "(restart required)");
+    ImGui::TextDisabled(prelaunch ? "（点击“开始”时生效）" : "（需重启生效）");
 
     constexpr int kLanguageCount = 6;
     int preferredLanguage = Port_Config_PreferredLanguage();
@@ -854,12 +931,12 @@ static bool DrawRegionLanguageControls(bool prelaunch) {
         preferredLanguage = -1;
 
     const char* langNames[] = {
-        "Auto (ROM/save default)", "Japanese", "English", "French", "German", "Spanish", "Italian",
+        "自动（ROM/存档默认）", "日本語", "English", "Français", "Deutsch", "Español", "Italiano",
     };
     int langIdx = preferredLanguage + 1; // map -1..5 to 0..6
 
     ImGui::SetNextItemWidth(270);
-    if (ImGui::BeginCombo("Language", langNames[langIdx])) {
+    if (ImGui::BeginCombo("语言", langNames[langIdx])) {
         for (int i = 0; i < 7; ++i) {
             bool isSupported = true;
             char label[128];
@@ -869,7 +946,7 @@ static bool DrawRegionLanguageControls(bool prelaunch) {
                 const int langVal = i - 1;
                 if (gTranslations[langVal] == nullptr) {
                     isSupported = false;
-                    std::strcat(label, " (not supported by loaded ROM)");
+                    std::strcat(label, "（当前 ROM 不支持）");
                 }
             }
 
@@ -887,7 +964,7 @@ static bool DrawRegionLanguageControls(bool prelaunch) {
         ImGui::EndCombo();
     }
     if (prelaunch) {
-        ImGui::TextDisabled("Language is applied after the selected ROM loads.");
+        ImGui::TextDisabled("语言将在所选 ROM 加载后生效。");
     }
     return regionChanged;
 }
@@ -897,13 +974,13 @@ static void DrawRibbonSavesTab(void) {
      * because the existing pause menu doesn't expose them. */
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.55f, 0.30f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.70f, 0.40f, 1.0f));
-    if (ImGui::Button("Save & Quit to Title"))
+    if (ImGui::Button("存档并返回标题"))
         DoQuitToTitle(true);
     ImGui::PopStyleColor(2);
     ImGui::SameLine();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.35f, 0.30f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.70f, 0.45f, 0.40f, 1.0f));
-    if (ImGui::Button("Quit to Title (no save)"))
+    if (ImGui::Button("返回标题（不存档）"))
         DoQuitToTitle(false);
     ImGui::PopStyleColor(2);
     ImGui::Separator();
@@ -912,7 +989,7 @@ static void DrawRibbonSavesTab(void) {
      * makes the save-state controls below inert. */
     {
         bool parity = Port_Config_GetConsoleParity();
-        if (ImGui::Checkbox("Console-Parity mode (legit-run integrity)", &parity)) {
+        if (ImGui::Checkbox("主机一致模式（速通合规）", &parity)) {
             Port_Config_SetConsoleParity(parity);
         }
         ImGui::SameLine();
@@ -920,38 +997,38 @@ static void DrawRibbonSavesTab(void) {
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos(360.0f);
-            ImGui::TextUnformatted("Holds the port provably equivalent to GBA "
-                                   "hardware for legitimate speedruns:\n"
-                                   "  - input edge-cache off (1-frame granularity)\n"
-                                   "  - save-states inert (no mid-run restores)\n"
-                                   "  - widescreen forced off (no early off-screen "
-                                   "AI / RNG advance)\n"
-                                   "  - frame pacing locked to 59.7275 Hz\n"
-                                   "Leave OFF for practice/casual play.");
+            ImGui::TextUnformatted("让本移植版在合规速通中与 GBA 实机\n"
+                                   "在证明层面保持等价：\n"
+                                   "  - 关闭输入预读（1 帧粒度）\n"
+                                   "  - 即时存档失效（无法中途回档）\n"
+                                   "  - 强制关闭宽屏（避免提前触发屏外\n"
+                                   "    AI / 随机数推进）\n"
+                                   "  - 帧率锁定 59.7275 Hz\n"
+                                   "练习/休闲游玩请保持关闭。");
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
         if (parity) {
-            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "Save-states disabled while Console-Parity is ON.");
+            ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "主机一致模式开启期间，即时存档已禁用。");
         }
     }
     ImGui::Separator();
 
     /* Auto-save controls at the top. */
     bool autoOn = Port_QuickSave_AutoEnabled();
-    if (ImGui::Checkbox("Auto-save", &autoOn)) {
+    if (ImGui::Checkbox("自动存档", &autoOn)) {
         Port_QuickSave_SetAutoEnabled(autoOn ? 1 : 0);
         Port_Config_SetAutosaveEnabled(autoOn);
     }
     ImGui::SameLine(180);
     int sec = (int)(Port_QuickSave_AutoIntervalMs() / 1000u);
-    if (ImGui::SliderInt("Interval (s)", &sec, 5, 600)) {
+    if (ImGui::SliderInt("间隔（秒）", &sec, 5, 600)) {
         Port_QuickSave_SetAutoIntervalMs((unsigned)sec * 1000u);
         Port_Config_SetAutosaveIntervalMs((unsigned)sec * 1000u);
     }
     {
         bool areaOn = Port_QuickSave_AutoOnAreaChangeEnabled() != 0;
-        if (ImGui::Checkbox("Auto-save on area change", &areaOn)) {
+        if (ImGui::Checkbox("切换区域时自动存档", &areaOn)) {
             Port_QuickSave_SetAutoOnAreaChange(areaOn ? 1 : 0);
         }
         ImGui::SameLine();
@@ -959,10 +1036,9 @@ static void DrawRibbonSavesTab(void) {
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos(360.0f);
-            ImGui::TextUnformatted("Fires a snapshot to the auto ring "
-                                   "every time you transition between "
-                                   "areas/rooms. Independent of the "
-                                   "interval timer above.");
+            ImGui::TextUnformatted("每次在区域/房间之间切换时，都会向\n"
+                                   "自动存档环写入一个快照。\n"
+                                   "与上方的间隔定时器相互独立。");
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
@@ -973,9 +1049,9 @@ static void DrawRibbonSavesTab(void) {
     const int n = Port_QuickSave_SlotCount();
     const int autoBase = Port_QuickSave_AutoSlotBase();
     if (ImGui::BeginTable("##quicksaves_table", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 140.0f);
-        ImGui::TableSetupColumn("Timestamp", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("槽位", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthFixed, 140.0f);
+        ImGui::TableSetupColumn("时间", ImGuiTableColumnFlags_WidthStretch);
 
         for (int s = 0; s < n; ++s) {
             ImGui::PushID(s);
@@ -986,31 +1062,31 @@ static void DrawRibbonSavesTab(void) {
             const char* tag;
             char tagbuf[16];
             if (s == 0)
-                tag = "Quick";
+                tag = "快速";
             else if (s < autoBase) {
-                std::snprintf(tagbuf, sizeof(tagbuf), "Slot %d", s);
+                std::snprintf(tagbuf, sizeof(tagbuf), "槽位 %d", s);
                 tag = tagbuf;
             } else {
-                std::snprintf(tagbuf, sizeof(tagbuf), "Auto %d", s - autoBase + 1);
+                std::snprintf(tagbuf, sizeof(tagbuf), "自动 %d", s - autoBase + 1);
                 tag = tagbuf;
             }
             ImGui::Text("%s", tag);
 
             // Column 2: Actions
             ImGui::TableSetColumnIndex(1);
-            if (ImGui::Button("Save")) {
+            if (ImGui::Button("保存")) {
                 if (Port_QuickSave_SaveSlot(s))
-                    Port_DebugMenu_ToastFromExternal("Saved");
+                    Port_DebugMenu_ToastFromExternal("已保存");
             }
             ImGui::SameLine();
             if (Port_QuickSave_HasSlot(s)) {
-                if (ImGui::Button("Load")) {
+                if (ImGui::Button("读取")) {
                     if (Port_QuickSave_LoadSlot(s))
-                        Port_DebugMenu_ToastFromExternal("Loaded");
+                        Port_DebugMenu_ToastFromExternal("已读取");
                 }
             } else {
                 ImGui::BeginDisabled();
-                ImGui::Button("Load");
+                ImGui::Button("读取");
                 ImGui::EndDisabled();
             }
 
@@ -1018,7 +1094,7 @@ static void DrawRibbonSavesTab(void) {
             ImGui::TableSetColumnIndex(2);
             unsigned long long ts = Port_QuickSave_SlotTimestamp(s);
             if (ts == 0) {
-                ImGui::TextDisabled("(empty)");
+                ImGui::TextDisabled("（空）");
             } else {
                 time_t tt = (time_t)ts;
                 struct tm tm_buf;
@@ -1044,7 +1120,7 @@ static void DrawRibbonProfilesTab(void) {
     const int n = Port_Save_ListProfiles(names, 32);
     const std::string activeNow = Port_Save_GetActivePath();
 
-    ImGui::Text("Active profile: %s", activeNow.c_str());
+    ImGui::Text("当前资料：%s", activeNow.c_str());
     ImGui::Separator();
 
     /* Rename buffer keyed by index, so each row has its own inline
@@ -1054,9 +1130,9 @@ static void DrawRibbonProfilesTab(void) {
     static int sConfirmDeleteRow = -1;
 
     if (ImGui::BeginTable("##profiles_table", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Profile File", ImGuiTableColumnFlags_WidthFixed, 180.0f);
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("资料文件", ImGuiTableColumnFlags_WidthFixed, 180.0f);
+        ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthStretch);
 
         for (int i = 0; i < n; ++i) {
             ImGui::PushID(i);
@@ -1070,7 +1146,7 @@ static void DrawRibbonProfilesTab(void) {
             ImGui::TableSetColumnIndex(1);
             bool isActive = (std::string(names[i]) == activeNow);
             if (isActive) {
-                ImGui::TextColored(ImVec4(1.0f, 0.94f, 0.25f, 1.0f), "active");
+                ImGui::TextColored(ImVec4(1.0f, 0.94f, 0.25f, 1.0f), "使用中");
             } else {
                 ImGui::TextDisabled("-");
             }
@@ -1078,21 +1154,21 @@ static void DrawRibbonProfilesTab(void) {
             // Column 3: Actions
             ImGui::TableSetColumnIndex(2);
             if (!isActive) {
-                if (ImGui::Button("Activate")) {
+                if (ImGui::Button("启用")) {
                     Port_Save_SetActivePath(names[i]);
                     Port_Config_SetActiveSaveProfile(names[i]);
-                    Port_DebugMenu_ToastFromExternal("Profile activated - go to title to load");
+                    Port_DebugMenu_ToastFromExternal("资料已启用——回到标题画面后读取");
                 }
                 ImGui::SameLine();
             }
             const bool isDefault = (std::strcmp(names[i], "tmc.sav") == 0);
             if (!isDefault) {
-                if (ImGui::Button("Rename")) {
+                if (ImGui::Button("重命名")) {
                     sRenameRow = i;
                     snprintf(sRenameBuf[i], sizeof(sRenameBuf[i]), "%s", names[i]);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Delete"))
+                if (ImGui::Button("删除"))
                     sConfirmDeleteRow = i;
             }
 
@@ -1103,11 +1179,11 @@ static void DrawRibbonProfilesTab(void) {
                 ImGui::InputText("##rename", sRenameBuf[i], sizeof(sRenameBuf[i]));
                 ImGui::PopItemWidth();
                 ImGui::TableSetColumnIndex(2);
-                if (ImGui::Button("OK")) {
+                if (ImGui::Button("确定")) {
                     if (Port_Save_RenameProfile(names[i], sRenameBuf[i])) {
-                        Port_DebugMenu_ToastFromExternal("Profile renamed");
+                        Port_DebugMenu_ToastFromExternal("资料已重命名");
                     } else {
-                        Port_DebugMenu_ToastFromExternal("Rename refused (clash / bad name / default)");
+                        Port_DebugMenu_ToastFromExternal("无法重命名（重名 / 名称非法 / 默认资料）");
                     }
                     sRenameRow = -1;
                 }
@@ -1118,19 +1194,19 @@ static void DrawRibbonProfilesTab(void) {
             if (sConfirmDeleteRow == i) {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
-                ImGui::TextColored(ImVec4(0.9f, 0.35f, 0.35f, 1.0f), "Delete %s?", names[i]);
+                ImGui::TextColored(ImVec4(0.9f, 0.35f, 0.35f, 1.0f), "删除 %s？", names[i]);
                 ImGui::TableSetColumnIndex(2);
-                if (ImGui::Button("Confirm delete")) {
+                if (ImGui::Button("确认删除")) {
                     if (Port_Save_DeleteProfile(names[i])) {
-                        Port_DebugMenu_ToastFromExternal("Profile deleted");
+                        Port_DebugMenu_ToastFromExternal("资料已删除");
                     } else {
-                        Port_DebugMenu_ToastFromExternal("Delete refused (active / bad name)");
+                        Port_DebugMenu_ToastFromExternal("无法删除（使用中 / 名称非法）");
                     }
                     sConfirmDeleteRow = -1;
                     sRenameRow = -1;
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Cancel"))
+                if (ImGui::Button("取消"))
                     sConfirmDeleteRow = -1;
             }
             ImGui::PopID();
@@ -1139,7 +1215,7 @@ static void DrawRibbonProfilesTab(void) {
     }
 
     ImGui::Separator();
-    if (ImGui::Button("+ Save current as new profile")) {
+    if (ImGui::Button("+ 将当前存档另存为新资料")) {
         char name[64];
         int k = 1;
         for (; k <= 99; ++k) {
@@ -1150,13 +1226,13 @@ static void DrawRibbonProfilesTab(void) {
             std::fclose(probe);
         }
         if (k > 99)
-            Port_DebugMenu_ToastFromExternal("No free profile slots (1-99)");
+            Port_DebugMenu_ToastFromExternal("没有空闲的资料槽位（1-99）");
         else if (Port_Save_SaveAsProfile(name)) {
             char msg[96];
-            std::snprintf(msg, sizeof(msg), "Saved current as %s", name);
+            std::snprintf(msg, sizeof(msg), "已将当前存档保存为 %s", name);
             Port_DebugMenu_ToastFromExternal(msg);
         } else {
-            Port_DebugMenu_ToastFromExternal("Save failed");
+            Port_DebugMenu_ToastFromExternal("保存失败");
         }
     }
 }
@@ -1167,64 +1243,64 @@ static void DrawRibbonProfilesTab(void) {
 static const char* InputLabel(int input) {
     switch (input) {
         case PORT_INPUT_A:
-            return "A button (action)";
+            return "A 键（确认）";
         case PORT_INPUT_B:
-            return "B button (sword)";
+            return "B 键（挥剑）";
         case PORT_INPUT_SELECT:
-            return "Select";
+            return "Select 键";
         case PORT_INPUT_START:
-            return "Start (pause)";
+            return "Start 键（暂停）";
         case PORT_INPUT_RIGHT:
-            return "D-pad Right";
+            return "十字键 右";
         case PORT_INPUT_LEFT:
-            return "D-pad Left";
+            return "十字键 左";
         case PORT_INPUT_UP:
-            return "D-pad Up";
+            return "十字键 上";
         case PORT_INPUT_DOWN:
-            return "D-pad Down";
+            return "十字键 下";
         case PORT_INPUT_R:
-            return "R (item slot 2)";
+            return "R（道具栏 2）";
         case PORT_INPUT_L:
-            return "L (item slot 1)";
+            return "L（道具栏 1）";
         case PORT_INPUT_SOFT_X:
-            return "Soft slot X";
+            return "快捷栏 X";
         case PORT_INPUT_SOFT_Y:
-            return "Soft slot Y";
+            return "快捷栏 Y";
         case PORT_INPUT_SOFT_L2:
-            return "Soft slot L2";
+            return "快捷栏 L2";
         case PORT_INPUT_SOFT_R2:
-            return "Soft slot R2";
+            return "快捷栏 R2";
         case PORT_INPUT_ROLL_ATTACK:
-            return "Roll attack (D / R3)";
+            return "翻滚攻击（D / R3）";
         default:
             return Port_Config_InputName((PortInput)input);
     }
 }
 
 static void DrawRibbonControlsTab(void) {
-    if (ImGui::CollapsingHeader("Keyboard shortcuts")) {
+    if (ImGui::CollapsingHeader("键盘快捷键")) {
         struct HotkeyRow {
             const char* key;
             const char* action;
         };
         static const HotkeyRow kHotkeys[] = {
-            { "F8", "Open / close this settings menu (gamepad: Select+Start)" },
-            { "F5 / F6", "Quicksave / quickload" },
-            { "F1-F4", "Load save-state slot 1-4  (Shift+Fn = save to slot)" },
-            { "F7", "Toggle text-to-speech" },
-            { "F9", "Capture a bug report (screenshot + save + state)" },
-            { "F10", "Speak nearby points of interest  (Shift: next, Ctrl: orient)" },
-            { "F11 / Alt+Enter", "Toggle fullscreen" },
-            { "F12", "Cycle the display filter / smoothing" },
-            { "Tab (hold)", "Fast-forward" },
-            { "[  ]", "Practice: set / reload practice point" },
-            { "P  .", "Practice: pause / frame-advance while paused" },
-            { "'  ;", "Practice: reset timer / record split" },
+            { "F8", "打开 / 关闭本设置菜单（手柄：Select+Start）" },
+            { "F5 / F6", "快速存档 / 快速读档" },
+            { "F1-F4", "读取存档槽 1-4（Shift+Fn = 保存到该槽）" },
+            { "F7", "开关文字转语音" },
+            { "F9", "生成错误报告（截图 + 存档 + 状态）" },
+            { "F10", "朗读附近值得注意的地点（Shift：下一个，Ctrl：方位）" },
+            { "F11 / Alt+Enter", "切换全屏" },
+            { "F12", "循环切换画面滤镜 / 平滑" },
+            { "Tab（按住）", "快进" },
+            { "[  ]", "练习：设置 / 载入练习点" },
+            { "P  .", "练习：暂停 / 暂停时逐帧推进" },
+            { "'  ;", "练习：重置计时器 / 记录分段" },
         };
         if (ImGui::BeginTable("##hotkeys", 2,
                               ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
-            ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 130.0f);
-            ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("按键", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+            ImGui::TableSetupColumn("功能", ImGuiTableColumnFlags_WidthStretch);
             for (const HotkeyRow& row : kHotkeys) {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
@@ -1234,59 +1310,58 @@ static void DrawRibbonControlsTab(void) {
             }
             ImGui::EndTable();
         }
-        ImGui::TextDisabled("Save-states (F1-F6) are disabled in Console-Parity mode.");
+        ImGui::TextDisabled("主机一致模式下即时存档（F1-F6）已禁用。");
     }
 #ifdef __ANDROID__
-    if (ImGui::CollapsingHeader("Touch controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("触屏控制", ImGuiTreeNodeFlags_DefaultOpen)) {
         {
             int scheme = (Port_Config_TouchScheme() == PORT_TOUCH_SCHEME_DPAD) ? 1 : 0;
-            const char* items[] = { "Joystick (floating)", "D-pad" };
-            if (ImGui::Combo("Movement", &scheme, items, 2)) {
+            const char* items[] = { "浮动摇杆", "十字键" };
+            if (ImGui::Combo("移动方式", &scheme, items, 2)) {
                 Port_Config_SetTouchScheme(scheme == 1 ? PORT_TOUCH_SCHEME_DPAD : PORT_TOUCH_SCHEME_JOYSTICK);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Joystick: touch anywhere on the lower-left of the screen to "
-                                  "plant the stick there.\nD-pad: fixed four-way pad.");
+                ImGui::SetTooltip("浮动摇杆：触摸屏幕左下任意位置即可放置摇杆。\n"
+                                  "十字键：固定四向键。");
             }
         }
         {
             float v = Port_Config_TouchScale();
-            if (ImGui::SliderFloat("Button size", &v, 0.6f, 1.6f, "%.2fx")) {
+            if (ImGui::SliderFloat("按钮大小", &v, 0.6f, 1.6f, "%.2fx")) {
                 Port_Config_SetTouchScale(v);
             }
         }
         {
             float v = Port_Config_TouchOpacity();
-            if (ImGui::SliderFloat("Overlay opacity", &v, 0.3f, 1.5f, "%.2fx")) {
+            if (ImGui::SliderFloat("覆盖层透明度", &v, 0.3f, 1.5f, "%.2fx")) {
                 Port_Config_SetTouchOpacity(v);
             }
         }
-        ImGui::TextDisabled("The R button glows green when it has an action (talk, read, lift...).");
+        ImGui::TextDisabled("R 键在有可用动作（交谈、阅读、举起……）时会亮起绿色。");
     }
     ImGui::Separator();
 #endif
     {
         bool on = Port_Config_GetRollAttackMacroEnabled();
-        if (ImGui::Checkbox("Roll attack macro", &on)) {
+        if (ImGui::Checkbox("翻滚攻击宏", &on)) {
             Port_Config_SetRollAttackMacroEnabled(on);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Hold a direction and press the Roll attack bind to perform a "
-                              "start-of-roll attack with your best sword, regardless of A/B "
-                              "equip.\nDefault: keyboard D, controller R3 (right stick click).");
+            ImGui::SetTooltip("按住方向键并按下“翻滚攻击”按键，即可无视 A/B 装备，"
+                              "用你最好的剑发动起手翻滚攻击。\n"
+                              "默认：键盘 D，手柄 R3（右摇杆按下）。");
         }
     }
     ImGui::Separator();
-    ImGui::TextWrapped("Click 'Set' to replace an action's binding, or 'Add' to bind an extra "
-                       "key/controller button to it, then press the input. Esc cancels. Mappings "
-                       "save to config.json automatically. In Console-Parity mode each physical "
-                       "input maps to only one action.");
+    ImGui::TextWrapped("点击“设置”可替换某个操作的绑定，或点击“添加”为该操作绑定额外的"
+                       "键盘键 / 手柄按键，然后按下目标输入。Esc 取消。映射会自动保存到 "
+                       "config.json。在主机一致模式下，每个物理输入只映射到一个操作。");
     ImGui::Separator();
 
     /* Two-column-ish table: action label | bindings + buttons. */
     if (ImGui::BeginTable("##controls", 3, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 200.0f);
-        ImGui::TableSetupColumn("Bindings", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+        ImGui::TableSetupColumn("绑定", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed, 180.0f);
 
         for (int i = 0; i < PORT_INPUT_COUNT; ++i) {
@@ -1299,7 +1374,7 @@ static void DrawRibbonControlsTab(void) {
             ImGui::TableSetColumnIndex(1);
             const int n = Port_Config_BindingCount((PortInput)i);
             if (n == 0) {
-                ImGui::TextDisabled("(unbound)");
+                ImGui::TextDisabled("（未绑定）");
             } else {
                 for (int b = 0; b < n; ++b) {
                     char label[64];
@@ -1313,17 +1388,17 @@ static void DrawRibbonControlsTab(void) {
             }
 
             ImGui::TableSetColumnIndex(2);
-            if (ImGui::Button("Set")) {
+            if (ImGui::Button("设置")) {
                 Port_Config_BeginCaptureBinding((PortInput)i);
-                ImGui::OpenPopup("Capture binding");
+                ImGui::OpenPopup("捕获按键");
             }
             ImGui::SameLine();
-            if (ImGui::Button("Add")) {
+            if (ImGui::Button("添加")) {
                 Port_Config_BeginAddBinding((PortInput)i);
-                ImGui::OpenPopup("Capture binding");
+                ImGui::OpenPopup("捕获按键");
             }
             ImGui::SameLine();
-            if (ImGui::Button("Clear")) {
+            if (ImGui::Button("清除")) {
                 Port_Config_ClearBindings((PortInput)i);
             }
 
@@ -1333,13 +1408,13 @@ static void DrawRibbonControlsTab(void) {
              * open at a time. */
             ImVec2 center = ImGui::GetMainViewport()->GetCenter();
             ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-            if (ImGui::BeginPopupModal("Capture binding", nullptr,
+            if (ImGui::BeginPopupModal("捕获按键", nullptr,
                                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-                ImGui::Text("Press a key or controller button for:");
+                ImGui::Text("请为以下操作按下键盘或手柄按键：");
                 ImGui::TextColored(ImVec4(1, 0.94f, 0.25f, 1), "%s", InputLabel(i));
-                ImGui::Text("Esc cancels.");
+                ImGui::Text("Esc 取消。");
                 ImGui::Separator();
-                if (ImGui::Button("Cancel") || !Port_Config_IsCapturingBinding()) {
+                if (ImGui::Button("取消") || !Port_Config_IsCapturingBinding()) {
                     Port_Config_CancelCaptureBinding();
                     ImGui::CloseCurrentPopup();
                 }
@@ -1354,9 +1429,9 @@ static void DrawRibbonControlsTab(void) {
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.30f, 0.20f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.40f, 0.30f, 1.0f));
-    if (ImGui::Button("Reset all to defaults")) {
+    if (ImGui::Button("全部恢复默认")) {
         Port_Config_ResetAllBindings();
-        Port_DebugMenu_ToastFromExternal("Bindings reset");
+        Port_DebugMenu_ToastFromExternal("按键已重置");
     }
     ImGui::PopStyleColor(2);
 }
@@ -1373,9 +1448,9 @@ static void DrawSoftSlotCycleButtons(int slot) {
 
 static void DrawRibbonEquipTab(void) {
     if (ImGui::BeginTable("##equip_table", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Slot", ImGuiTableColumnFlags_WidthFixed, 60.0f);
-        ImGui::TableSetupColumn("Assigned Item", ImGuiTableColumnFlags_WidthFixed, 220.0f);
-        ImGui::TableSetupColumn("Cycle", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("槽位", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("已分配道具", ImGuiTableColumnFlags_WidthFixed, 220.0f);
+        ImGui::TableSetupColumn("切换", ImGuiTableColumnFlags_WidthStretch);
 
         for (int s = 0; s < 4; ++s) {
             ImGui::PushID(s);
@@ -1421,14 +1496,14 @@ static void DrawRibbonWarpTab(void) {
      * everything. Case-insensitive substring match. Steam Deck users
      * can ignore the filter and just scroll. */
     ImGui::SetNextItemWidth(280);
-    ImGui::InputTextWithHint("##warpFilter", "filter by area name (e.g. 'castle')", sWarpFilter, sizeof(sWarpFilter));
+    ImGui::InputTextWithHint("##warpFilter", "按区域名筛选（如“城堡”）", sWarpFilter, sizeof(sWarpFilter));
     ImGui::SameLine();
-    if (ImGui::Button("Clear"))
+    if (ImGui::Button("清除"))
         sWarpFilter[0] = '\0';
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
-    ImGui::TextDisabled("L/R bumpers = page jump");
+    ImGui::TextDisabled("L/R 肩键 = 翻页");
 
     /* Free-coordinate teleport within the CURRENT room. Pre-fills from Link's
      * live position; in-game only. (All primitives already exist - this is the
@@ -1438,7 +1513,7 @@ static void DrawRibbonWarpTab(void) {
         static int sTeleX = 0, sTeleY = 0;
         unsigned short px = 0, py = 0;
         const bool inGame = Port_DebugQuery_PlayerXY(&px, &py) != 0;
-        ImGui::TextUnformatted("Teleport (current room):");
+        ImGui::TextUnformatted("传送（当前房间）：");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
         ImGui::InputInt("X##tele", &sTeleX, 0);
@@ -1447,34 +1522,34 @@ static void DrawRibbonWarpTab(void) {
         ImGui::InputInt("Y##tele", &sTeleY, 0);
         ImGui::BeginDisabled(!inGame);
         ImGui::SameLine();
-        if (ImGui::Button("Go##tele")) {
+        if (ImGui::Button("传送##tele")) {
             unsigned short tx = (unsigned short)(sTeleX < 0 ? 0 : sTeleX);
             unsigned short ty = (unsigned short)(sTeleY < 0 ? 0 : sTeleY);
             if (Port_DebugAction_TeleportXY(tx, ty)) {
                 char msg[64];
-                std::snprintf(msg, sizeof(msg), "Teleport -> (%u, %u)", tx, ty);
+                std::snprintf(msg, sizeof(msg), "已传送 -> (%u, %u)", tx, ty);
                 Port_DebugMenu_ToastFromExternal(msg);
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Use Link's pos")) {
+        if (ImGui::Button("使用林克坐标")) {
             sTeleX = px;
             sTeleY = py;
         }
         ImGui::EndDisabled();
         if (!inGame) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(in-game only)");
+            ImGui::TextDisabled("（仅游戏中）");
         }
     }
     {
         bool noclip = Port_DebugQuery_Noclip() != 0;
-        if (ImGui::Checkbox("Noclip (walk through walls)", &noclip)) {
+        if (ImGui::Checkbox("穿墙模式（可穿过墙壁）", &noclip)) {
             Port_DebugAction_SetNoclip(noclip ? 1 : 0);
         }
         if (Port_Config_GetConsoleParity()) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(disabled in Console-Parity)");
+            ImGui::TextDisabled("（主机一致模式下禁用）");
         }
     }
     {
@@ -1482,13 +1557,13 @@ static void DrawRibbonWarpTab(void) {
         const bool inGame = Port_DebugQuery_PlayerXY(&px, &py) != 0;
         const bool isMinish = inGame && (Port_DebugQuery_IsMinish() != 0);
         ImGui::BeginDisabled(!inGame);
-        if (ImGui::Button(isMinish ? "Grow to Normal Size" : "Shrink to Minish")) {
+        if (ImGui::Button(isMinish ? "恢复正常大小" : "缩小为 Minish")) {
             Port_DebugAction_ToggleMinish();
         }
         ImGui::EndDisabled();
         if (!inGame) {
             ImGui::SameLine();
-            ImGui::TextDisabled("(in-game only)");
+            ImGui::TextDisabled("（仅游戏中）");
         }
     }
     ImGui::Separator();
@@ -1500,7 +1575,7 @@ static void DrawRibbonWarpTab(void) {
     static char sLetterFilter = 0; /* 0 = no letter filter */
     {
         const char* kLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        if (ImGui::SmallButton("All##warpLet"))
+        if (ImGui::SmallButton("全部##warpLet"))
             sLetterFilter = 0;
         for (const char* p = kLetters; *p; ++p) {
             ImGui::SameLine();
@@ -1565,7 +1640,7 @@ static void DrawRibbonWarpTab(void) {
             if (!Port_DebugAction_AreaIsWarpable(a))
                 continue;
             char header[96];
-            std::snprintf(header, sizeof(header), "0x%02X  %s  (%d rooms)", area, name, roomCount);
+            std::snprintf(header, sizeof(header), "0x%02X  %s  （%d 个房间）", area, name, roomCount);
 
             if (!filter_lower.empty()) {
                 std::string hl(header);
@@ -1597,7 +1672,7 @@ static void DrawRibbonWarpTab(void) {
                     if (!Port_DebugQuery_RoomDimensions(a, (unsigned char)r, &w, &h))
                         continue;
                     char roomLabel[48];
-                    std::snprintf(roomLabel, sizeof(roomLabel), "Room 0x%02X", r);
+                    std::snprintf(roomLabel, sizeof(roomLabel), "房间 0x%02X", r);
                     ImGui::PushID(r);
                     if (ImGui::Button(roomLabel, ImVec2(120, 0))) {
                         unsigned short cx = 0, cy = 0;
@@ -1609,10 +1684,10 @@ static void DrawRibbonWarpTab(void) {
                         }
                         if (Port_DebugAction_Warp(a, (unsigned char)r, cx, cy, layer)) {
                             char msg[96];
-                            std::snprintf(msg, sizeof(msg), "Warp -> 0x%02X room 0x%02X", area, r);
+                            std::snprintf(msg, sizeof(msg), "已传送 -> 区域 0x%02X 房间 0x%02X", area, r);
                             Port_DebugMenu_ToastFromExternal(msg);
                         } else {
-                            Port_DebugMenu_ToastFromExternal("Warp ignored: not in gameplay");
+                            Port_DebugMenu_ToastFromExternal("传送被忽略：当前不在游戏中");
                         }
                     }
                     ImGui::PopID();
@@ -1625,7 +1700,7 @@ static void DrawRibbonWarpTab(void) {
             ImGui::PopID();
         }
         if (shown == 0) {
-            ImGui::TextDisabled("No areas match the filter.");
+            ImGui::TextDisabled("没有匹配筛选条件的区域。");
         }
     }
     ImGui::EndChild();
@@ -1650,33 +1725,31 @@ static bool sRandoUiSettingsInit = false;
  * tab and the file-select sidebar so the two entry points can never drift
  * apart on labels/wording (a prior UX bug). */
 static const char* const kRandoPoolCombo[RANDO_ITEM_POOL_COUNT] = {
-    "Normal - collectibles only",
-    "Hard - + non-gating majors",
-    "Chaos - + gating progression",
+    "普通——仅收集品",
+    "困难——加入非卡关大件",
+    "混沌——加入卡关推进",
 };
 static const char* const kRandoPoolTooltip =
-    "Normal: shuffles rupees, hearts, kinstones, ammo, shells, and heart pieces "
-    "- progression untouched.\nHard: also shuffles non-gating majors (bottles, "
-    "upgrades, skills).\nChaos: also shuffles dungeon-gating progression.\n"
-    "Hard/Chaos scrambling of majors and progression applies to story gifts too, "
-    "which cannot be verified beatable - so it requires Glitchless logic OFF. "
-    "With Glitchless ON those items stay vanilla and only collectibles are scrambled.";
+    "普通：随机卢比、心、Kinstone、弹药、贝壳与心之碎片——推进流程不受影响。\n"
+    "困难：额外随机非卡关大件（瓶子、升级、技能）。\n"
+    "混沌：额外随机迷宫卡关推进道具。\n"
+    "困难/混沌模式下，大件与推进道具的乱序同样作用于剧情赠礼——它们无法被验证为可通关，"
+    "因此需要关闭“无故障逻辑”。开启“无故障逻辑”时，这些道具保持原版，只有收集品被随机。";
 static const char* const kRandoAccessCombo[RANDO_ACCESS_COUNT] = {
-    "Goal only (fastest generation)",
-    "All non-key checks reachable",
-    "All checks reachable",
+    "仅目标可达（生成最快）",
+    "所有非钥匙检查点可达",
+    "所有检查点可达",
 };
 static const char* const kRandoAccessTooltip =
-    "Goal only: just the final boss must be reachable (a seed may bury optional "
-    "checks behind items you never need). All non-key: every check except "
-    "unshuffled small keys must be reachable. All: every check reachable. "
-    "Stronger modes reject more seeds during generation but never make a seed "
-    "unbeatable.";
+    "仅目标：只需最终 Boss 可达（种子可能把可选检查点埋在永远用不上的道具后面）。\n"
+    "非钥匙：除未随机的小钥匙外，所有检查点都必须可达。\n"
+    "全部：每个检查点都可达。更强的模式在生成时会拒绝更多种子，"
+    "但绝不会产出无法通关的种子。";
 static const char* const kRandoTrickOcarina = "Ocarina Glitch - ToD entry without Flippers";
 static const char* const kRandoTrickCrenel = "Crenel Clip - Mt. Crenel to Castor Wilds";
 static const char* const kRandoTrickPjs = "Portal Jump Storage - early Cloud Tops";
-static const char* const kRandoTrickTooltip = "Glitch-logic tier: progression may be placed behind these documented "
-                                              "speedrun glitches. Requires Glitchless logic OFF.";
+static const char* const kRandoTrickTooltip = "故障逻辑档：推进道具可能被放在需要下列已记录在案的速通故障之后。\n"
+                                              "需要关闭“无故障逻辑”。";
 
 /* ---- Cosmetics (.logic !color settings) ----------------------------------
  * A RANDO_SETTING_COLOR setting carries option_count default color sets
@@ -1837,22 +1910,22 @@ static void RandoUi_RemoveOverride(const char* define) {
 
 static void DrawRandoCosmeticsSection(void) {
     ImGui::Spacing();
-    if (!ImGui::CollapsingHeader("Cosmetics", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!ImGui::CollapsingHeader("外观", ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
-    static const char* kTunicColors[] = { "Green (Vanilla)", "Red", "Blue", "Purple", "Orange", "Grey", "Random" };
-    static const char* kHeartColors[] = { "Red (Vanilla)", "Blue", "Green", "Yellow", "Purple", "Rainbow", "Random" };
+    static const char* kTunicColors[] = { "绿（原版）", "红", "蓝", "紫", "橙", "灰", "随机" };
+    static const char* kHeartColors[] = { "红（原版）", "蓝", "绿", "黄", "紫", "彩虹", "随机" };
 
     int tunic = Port_Config_GetRandoTunicColor();
     int heart = Port_Config_GetRandoHeartColor();
     bool changed = false;
 
     ImGui::SetNextItemWidth(200);
-    if (ImGui::Combo("Tunic color", &tunic, kTunicColors, 7)) {
+    if (ImGui::Combo("上衣颜色", &tunic, kTunicColors, 7)) {
         changed = true;
     }
     ImGui::SetNextItemWidth(200);
-    if (ImGui::Combo("Heart color", &heart, kHeartColors, 7)) {
+    if (ImGui::Combo("心形颜色", &heart, kHeartColors, 7)) {
         changed = true;
     }
 
@@ -2064,7 +2137,7 @@ static void DrawRandoPresetsRow(void) {
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Load preset"))
+    if (ImGui::Button("应用预设"))
         RandoUi_ApplyPreset(sPresetIdx);
     RandoUi_HelpTooltip(kRandoPresets[sPresetIdx].desc);
 }
@@ -2125,7 +2198,7 @@ static void DrawRandoSettingRow(const RandoLogicSetting* s, int idx) {
     }
     if (ImGui::BeginPopupContextItem("##setting_ctx")) {
         ImGui::TextDisabled("%s", s->define);
-        if (ImGui::MenuItem("Reset to default", NULL, false, modified)) {
+        if (ImGui::MenuItem("恢复默认", NULL, false, modified)) {
             char value[40];
             RandoUi_SettingDefaultValue(s, value, sizeof(value));
             RandoUi_ApplyOverride(s->define, value);
@@ -2143,22 +2216,22 @@ static void DrawRandoLogicSettingsBrowser(float height) {
 
     sFilter.Draw("##rando_settings_filter", 200);
     ImGui::SameLine();
-    ImGui::TextDisabled("Search");
+    ImGui::TextDisabled("搜索");
     const int modified = RandoUi_ModifiedSettingCount();
     if (modified > 0) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "* %d changed", modified);
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "* %d 项已修改", modified);
         ImGui::SameLine();
-        if (ImGui::SmallButton("Reset all"))
+        if (ImGui::SmallButton("全部重置"))
             ImGui::OpenPopup("##rando_reset_all");
         if (ImGui::BeginPopup("##rando_reset_all")) {
-            ImGui::TextUnformatted("Reset every setting to the file defaults?");
-            if (ImGui::Button("Reset")) {
+            ImGui::TextUnformatted("把所有设置恢复为文件默认值？");
+            if (ImGui::Button("重置")) {
                 RandoUi_ResetSettingsToDefaults();
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Keep"))
+            if (ImGui::Button("保留"))
                 ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
@@ -2399,9 +2472,9 @@ static void DrawRandoTrackerOverlay(void) {
     }
 
     ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("Randomizer HUD Tracker", &sShowRandoTracker, ImGuiWindowFlags_NoCollapse)) {
+    if (ImGui::Begin("随机化 HUD 追踪器", &sShowRandoTracker, ImGuiWindowFlags_NoCollapse)) {
         if (ImGui::BeginTabBar("##tracker_tabs")) {
-            if (ImGui::BeginTabItem("Items")) {
+            if (ImGui::BeginTabItem("道具")) {
                 struct TrackerItem {
                     const char* label;
                     const char* sym;
@@ -2419,7 +2492,7 @@ static void DrawRandoTrackerOverlay(void) {
                     { "Grip Ring", "Items.GripRing" },
                 };
 
-                ImGui::SeparatorText("Key Items");
+                ImGui::SeparatorText("关键道具");
                 if (ImGui::BeginTable("##tracker_items_grid", 5, ImGuiTableFlags_SizingFixedFit)) {
                     for (int i = 0; i < 10; ++i) {
                         if ((i % 5) == 0)
@@ -2431,7 +2504,7 @@ static void DrawRandoTrackerOverlay(void) {
                     ImGui::EndTable();
                 }
 
-                ImGui::SeparatorText("Progressive Upgrades");
+                ImGui::SeparatorText("渐进升级");
                 if (ImGui::BeginTable("##tracker_upgrades", 2, ImGuiTableFlags_SizingFixedFit)) {
                     ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 100.0f);
                     ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
@@ -2451,7 +2524,7 @@ static void DrawRandoTrackerOverlay(void) {
                     else if (RandoUi_CheckItemOwned("Items.SmithSword"))
                         ImGui::Text("Smith's Sword");
                     else
-                        ImGui::TextDisabled("None");
+                        ImGui::TextDisabled("无");
 
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
@@ -2462,7 +2535,7 @@ static void DrawRandoTrackerOverlay(void) {
                     else if (RandoUi_CheckItemOwned("Items.Shield"))
                         ImGui::Text("Small Shield");
                     else
-                        ImGui::TextDisabled("None");
+                        ImGui::TextDisabled("无");
 
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
@@ -2473,7 +2546,7 @@ static void DrawRandoTrackerOverlay(void) {
                     else if (RandoUi_CheckItemOwned("Items.Bow"))
                         ImGui::Text("Bow");
                     else
-                        ImGui::TextDisabled("None");
+                        ImGui::TextDisabled("无");
 
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
@@ -2484,12 +2557,12 @@ static void DrawRandoTrackerOverlay(void) {
                     else if (RandoUi_CheckItemOwned("Items.Bombs"))
                         ImGui::Text("Normal Bombs");
                     else
-                        ImGui::TextDisabled("None");
+                        ImGui::TextDisabled("无");
 
                     ImGui::EndTable();
                 }
 
-                ImGui::SeparatorText("Elements");
+                ImGui::SeparatorText("元素");
                 if (ImGui::BeginTable("##tracker_elements", 4, ImGuiTableFlags_SizingFixedFit)) {
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
@@ -2510,7 +2583,7 @@ static void DrawRandoTrackerOverlay(void) {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Dungeons")) {
+            if (ImGui::BeginTabItem("迷宫")) {
                 static const struct {
                     const char* name;
                     int idx;
@@ -2528,11 +2601,11 @@ static void DrawRandoTrackerOverlay(void) {
                 if (ImGui::BeginTable("##tracker_dungeons", 5,
                                       ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg |
                                           ImGuiTableFlags_BordersOuter)) {
-                    ImGui::TableSetupColumn("Dungeon", ImGuiTableColumnFlags_WidthFixed, 180.0f);
-                    ImGui::TableSetupColumn("Element", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-                    ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-                    ImGui::TableSetupColumn("Big Key", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-                    ImGui::TableSetupColumn("Boss Clear", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("迷宫", ImGuiTableColumnFlags_WidthFixed, 180.0f);
+                    ImGui::TableSetupColumn("元素", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                    ImGui::TableSetupColumn("钥匙", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                    ImGui::TableSetupColumn("大钥匙", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                    ImGui::TableSetupColumn("Boss", ImGuiTableColumnFlags_WidthStretch);
                     ImGui::TableHeadersRow();
 
                     for (int i = 0; i < 7; ++i) {
@@ -2545,7 +2618,7 @@ static void DrawRandoTrackerOverlay(void) {
                         if (kDungeonInfo[i].elem[0]) {
                             bool has_el = RandoUi_CheckItemOwned(kDungeonInfo[i].elem);
                             if (has_el)
-                                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Yes");
+                                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "有");
                             else
                                 ImGui::TextDisabled("-");
                         } else {
@@ -2555,14 +2628,14 @@ static void DrawRandoTrackerOverlay(void) {
                         ImGui::TableSetColumnIndex(2);
                         unsigned keys = Rando_GetDungeonKeyCount(idx);
                         if (keys > 0)
-                            ImGui::Text("%u keys", keys);
+                            ImGui::Text("%u 把钥匙", keys);
                         else
                             ImGui::TextDisabled("0");
 
                         ImGui::TableSetColumnIndex(3);
                         bool has_bk = Rando_GetDungeonHasBigKey(idx);
                         if (has_bk)
-                            ImGui::TextColored(ImVec4(0.95f, 0.8f, 0.2f, 1.0f), "Yes");
+                            ImGui::TextColored(ImVec4(0.95f, 0.8f, 0.2f, 1.0f), "有");
                         else
                             ImGui::TextDisabled("-");
 
@@ -2570,7 +2643,7 @@ static void DrawRandoTrackerOverlay(void) {
                         if (idx <= 6) {
                             bool cleared = CheckGlobalFlag(idx);
                             if (cleared)
-                                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Defeated");
+                                ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "已击败");
                             else
                                 ImGui::TextDisabled("-");
                         } else {
@@ -2582,11 +2655,11 @@ static void DrawRandoTrackerOverlay(void) {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("Locations")) {
+            if (ImGui::BeginTabItem("地点")) {
                 static ImGuiTextFilter sLocFilter;
                 sLocFilter.Draw("##loc_filter", 180);
                 ImGui::SameLine();
-                ImGui::TextDisabled("Filter by area/check name");
+                ImGui::TextDisabled("按区域/检查点名称筛选");
 
                 ImGui::BeginChild("##tracker_loc_list", ImVec2(0, 0), ImGuiChildFlags_Borders, 0);
                 char cur_area[48] = "";
@@ -2636,7 +2709,7 @@ static void DrawRandoTrackerOverlay(void) {
                             }
                         }
                         char header[64];
-                        std::snprintf(header, sizeof(header), "%s (%d available)###area_%s", cur_area, avail, cur_area);
+                        std::snprintf(header, sizeof(header), "%s (%d 个可达)###area_%s", cur_area, avail, cur_area);
                         area_open = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen);
                     }
 
@@ -2650,7 +2723,7 @@ static void DrawRandoTrackerOverlay(void) {
                         ImGui::SameLine();
                         ImGui::TextUnformatted(label);
                         if (ImGui::IsItemHovered()) {
-                            ImGui::SetTooltip("Logical check: %s", name);
+                            ImGui::SetTooltip("逻辑检查点：%s", name);
                         }
                     }
                 }
@@ -2700,132 +2773,129 @@ static void DrawRibbonRandomizerTab(void) {
                 else if (std::strcmp(region, "BZMP") == 0)
                     region_label = "EU (BZMP)";
                 else if (std::strcmp(region, "BZMJ") == 0)
-                    region_label = "JP (BZMJ) - not supported";
+                    region_label = "JP (BZMJ) - 暂不支持";
                 else
                     region_label = region;
             }
         }
     }
 
-    ImGui::TextUnformatted("Native in-process randomizer");
+    ImGui::TextUnformatted("进程内原生随机化引擎");
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(360.0f);
-        ImGui::TextUnformatted("Rolls a seed and resolves rewards live through a fixed location "
-                               "table - no ROM files written, no restart needed. Progression, "
-                               "major, and junk pools are forward-filled against the "
-                               "reachability graph and a playthrough is simulated before the "
-                               "seed activates, so rolled seeds are always beatable. The active "
-                               "seed persists per save slot in a .randomizer sidecar.");
+        ImGui::TextUnformatted("生成一个种子，并通过固定的地点表实时解析奖励——"
+                               "不写入任何 ROM 文件，也无需重启。推进、大件与杂物池会"
+                               "基于可达性图正向填充，并在种子生效前模拟一次通关，"
+                               "因此生成的种子必定可通关。当前种子按存档槽保存在 "
+                               ".randomizer 旁车文件中。");
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
     ImGui::Separator();
 
-    ImGui::Text("Source ROM:  %s", src_rom ? src_rom : "(none)");
-    ImGui::Text("Region:      %s", region_label);
-    ImGui::Text("Logic:       built-in native graph (%d locations)", RANDO_LOCATION_COUNT);
+    ImGui::Text("源 ROM：%s", src_rom ? src_rom : "（无）");
+    ImGui::Text("区域：%s", region_label);
+    ImGui::Text("逻辑：内建原生图（%d 个地点）", RANDO_LOCATION_COUNT);
 
     if (Rando_IsActive()) {
-        static const char* kPoolNames[RANDO_ITEM_POOL_COUNT] = { "Normal", "Hard", "Chaos" };
+        static const char* kPoolNames[RANDO_ITEM_POOL_COUNT] = { "普通", "困难", "混沌" };
         const RandomizerSettings active = Rando_GetSettings();
         const int pool = (active.item_difficulty < RANDO_ITEM_POOL_COUNT) ? (int)active.item_difficulty : 0;
-        ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "Active seed: %llu - %s pool%s",
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.4f, 1.0f), "当前种子：%llu——%s 池%s",
                            (unsigned long long)Rando_GetSeed64(), kPoolNames[pool],
-                           active.glitchless_logic ? ", glitchless" : "");
+                           active.glitchless_logic ? "，无故障" : "");
         ImGui::SameLine();
-        if (ImGui::SmallButton("Copy seed")) {
+        if (ImGui::SmallButton("复制种子")) {
             char text[32];
             std::snprintf(text, sizeof(text), "%llu", (unsigned long long)Rando_GetSeed64());
             ImGui::SetClipboardText(text);
         }
         char fp[16];
         std::snprintf(fp, sizeof(fp), "%08X", Rando_SettingsFingerprint(&active));
-        ImGui::Text("Fingerprint: %s", fp);
-        RandoUi_HelpTooltip("Hash of every placement-affecting setting. Two players with the "
-                            "same seed AND the same fingerprint are playing the identical seed.");
+        ImGui::Text("指纹：%s", fp);
+        RandoUi_HelpTooltip("影响布局的每一项设置的哈希。两个玩家若种子相同"
+                            "且指纹相同，玩的就是完全相同的种子。");
         ImGui::SameLine();
-        if (ImGui::SmallButton("Copy fingerprint")) {
+        if (ImGui::SmallButton("复制指纹")) {
             ImGui::SetClipboardText(fp);
         }
-        ImGui::Checkbox("Show HUD Tracker", &sShowRandoTracker);
+        ImGui::Checkbox("显示 HUD 追踪器", &sShowRandoTracker);
     } else {
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "No seed rolled - vanilla.");
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "尚未生成种子——原版内容。");
     }
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Settings");
+    ImGui::SeparatorText("设置");
 
     int difficulty = (int)sRandoUiSettings.item_difficulty;
     bool changed = false;
 
     ImGui::SetNextItemWidth(280);
-    if (ImGui::Combo("Item pool", &difficulty, kRandoPoolCombo, RANDO_ITEM_POOL_COUNT)) {
+    if (ImGui::Combo("道具池", &difficulty, kRandoPoolCombo, RANDO_ITEM_POOL_COUNT)) {
         sRandoUiSettings.item_difficulty = (RandoItemPoolDifficulty)difficulty;
         changed = true;
     }
     RandoUi_HelpTooltip(kRandoPoolTooltip);
 
-    if (ImGui::Checkbox("Glitchless logic", &sRandoUiSettings.glitchless_logic))
+    if (ImGui::Checkbox("无故障逻辑", &sRandoUiSettings.glitchless_logic))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Obscure spots", &sRandoUiSettings.obscure_locations))
+    if (ImGui::Checkbox("冷门地点", &sRandoUiSettings.obscure_locations))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Shuffle kinstones", &sRandoUiSettings.shuffle_kinstones))
+    if (ImGui::Checkbox("Kinstone 随机", &sRandoUiSettings.shuffle_kinstones))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Shuffle entrances", &sRandoUiSettings.shuffle_entrances))
+    if (ImGui::Checkbox("随机出入口", &sRandoUiSettings.shuffle_entrances))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Shuffle dojos", &sRandoUiSettings.shuffle_dojos))
+    if (ImGui::Checkbox("随机道场", &sRandoUiSettings.shuffle_dojos))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Shuffle dungeon items", &sRandoUiSettings.shuffle_dungeon_items))
+    if (ImGui::Checkbox("随机迷宫道具", &sRandoUiSettings.shuffle_dungeon_items))
         changed = true;
-    RandoUi_HelpTooltip("Off (default): each dungeon's map, compass, and big key stay in "
-                        "their vanilla chests. On: they join the shuffle and can be found in "
-                        "any dungeon - each is credited to its home dungeon when picked up.");
+    RandoUi_HelpTooltip("关（默认）：每个迷宫的地图、罗盘与大钥匙留在原版的宝箱里。"
+                        "开：它们加入随机池，可能出现在任意迷宫——拾取时计入其所属迷宫。");
 
-    if (ImGui::Checkbox("Open world", &sRandoUiSettings.open_world))
+    if (ImGui::Checkbox("开放世界", &sRandoUiSettings.open_world))
         changed = true;
-    RandoUi_HelpTooltip("Starts with every permanently solvable obstacle pre-solved: cut "
-                        "trees, cracked blocks, bomb walls, boulder shortcuts, non-key "
-                        "doors, bean vines, switches, levers, chest spawns, and "
-                        "extendable bridges (1:1 with the GBA randomizer's World "
-                        "Settings \"Open\"). Less walking, shorter seeds.");
+    RandoUi_HelpTooltip("开局时所有可永久解除的障碍都已解除：可砍的树、裂纹石块、炸弹墙、"
+                        "滚石捷径、非钥匙门、豆蔓、开关、拉杆、宝箱点与伸缩桥"
+                        "（与 GBA 随机化的 World Settings「Open」1:1 对应）。"
+                        "更少跑路，更短种子。");
 
     ImGui::SameLine();
-    if (ImGui::Checkbox("Sleep warp (homewarp)", &sRandoUiSettings.homewarp))
+    if (ImGui::Checkbox("睡眠传送（homewarp）", &sRandoUiSettings.homewarp))
         changed = true;
 
-    if (ImGui::Checkbox("Start with Smith's Sword", &sRandoUiSettings.start_sword))
+    if (ImGui::Checkbox("开局带 Smith's Sword", &sRandoUiSettings.start_sword))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Early Wind Crests", &sRandoUiSettings.early_crests))
+    if (ImGui::Checkbox("提前获得 Wind Crests", &sRandoUiSettings.early_crests))
         changed = true;
     ImGui::SameLine();
-    if (ImGui::Checkbox("Fast text (instant text)", &sRandoUiSettings.instant_text))
+    if (ImGui::Checkbox("快速文本（instant text）", &sRandoUiSettings.instant_text))
         changed = true;
 
     if (sRandoUiSettings.glitchless_logic && sRandoUiSettings.item_difficulty > RANDO_ITEM_POOL_NORMAL) {
-        ImGui::TextDisabled("Glitchless ON: %s pool only scrambles collectibles "
-                            "(guaranteed beatable).",
-                            sRandoUiSettings.item_difficulty == RANDO_ITEM_POOL_CHAOS ? "Chaos" : "Hard");
+        ImGui::TextDisabled("无故障逻辑已开启：%s 池只随机收集品"
+                            "（保证可通关）。",
+                            sRandoUiSettings.item_difficulty == RANDO_ITEM_POOL_CHAOS ? "混沌" : "困难");
     }
 
     int access = (int)sRandoUiSettings.accessibility;
     ImGui::SetNextItemWidth(280);
-    if (ImGui::Combo("Accessibility", &access, kRandoAccessCombo, RANDO_ACCESS_COUNT)) {
+    if (ImGui::Combo("可达性", &access, kRandoAccessCombo, RANDO_ACCESS_COUNT)) {
         sRandoUiSettings.accessibility = (RandoAccessibility)access;
         changed = true;
     }
     RandoUi_HelpTooltip(kRandoAccessTooltip);
 
     if (!sRandoUiSettings.glitchless_logic) {
-        ImGui::SeparatorText("Glitch tricks (progression may be placed behind these)");
+        ImGui::SeparatorText("Glitch 技巧（推进道具可能被放在其后）");
         if (ImGui::CheckboxFlags(kRandoTrickOcarina, &sRandoUiSettings.tricks, RANDO_TRICK_OCARINA_GLITCH))
             changed = true;
         if (ImGui::CheckboxFlags(kRandoTrickCrenel, &sRandoUiSettings.tricks, RANDO_TRICK_CRENEL_CLIP))
@@ -2833,7 +2903,7 @@ static void DrawRibbonRandomizerTab(void) {
         if (ImGui::CheckboxFlags(kRandoTrickPjs, &sRandoUiSettings.tricks, RANDO_TRICK_PORTAL_JUMP_STORAGE))
             changed = true;
     } else {
-        ImGui::TextDisabled("Glitch tricks are selectable when Glitchless logic is OFF.");
+        ImGui::TextDisabled("关闭“无故障逻辑”后即可选择 Glitch 技巧。");
     }
 
     if (changed) {
@@ -2852,11 +2922,11 @@ static void DrawRibbonRandomizerTab(void) {
 
     ImGui::Spacing();
     ImGui::SetNextItemWidth(280);
-    ImGui::InputText("Seed (empty = random)", sRandoSeedBuf, sizeof(sRandoSeedBuf));
-    RandoUi_HelpTooltip("Decimal numbers are used as-is; any other text is hashed to a "
-                        "64-bit seed, so phrases work and are shareable.");
+    ImGui::InputText("种子（留空 = 随机）", sRandoSeedBuf, sizeof(sRandoSeedBuf));
+    RandoUi_HelpTooltip("十进制数字会原样使用；其它文本会被哈希成 64 位种子，"
+                        "所以短语也可用、可分享。");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Random")) {
+    if (ImGui::SmallButton("随机")) {
         uint64_t r = (uint64_t)ImGui::GetTime() * 0x9E3779B97F4A7C15ull ^ Rando_GetSeed64();
         r ^= r >> 30;
         r *= 0xBF58476D1CE4E5B9ull;
@@ -2864,7 +2934,7 @@ static void DrawRibbonRandomizerTab(void) {
         std::snprintf(sRandoSeedBuf, sizeof(sRandoSeedBuf), "%llu", (unsigned long long)r);
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Copy")) {
+    if (ImGui::SmallButton("复制")) {
         ImGui::SetClipboardText(sRandoSeedBuf);
     }
 
@@ -2872,20 +2942,19 @@ static void DrawRibbonRandomizerTab(void) {
     const bool rollInGameplay = Rando_IsInGameplay();
     const bool rollInFileSelect = !rollInGameplay && Rando_IsInFileSelect();
     ImGui::BeginDisabled(rollInGameplay || rollInFileSelect);
-    const bool rolled_normal = ImGui::Button("Roll new seed", ImVec2(150, 0));
+    const bool rolled_normal = ImGui::Button("生成新种子", ImVec2(150, 0));
     ImGui::SameLine();
-    const bool rolled_race = ImGui::Button("Roll race seed", ImVec2(150, 0));
+    const bool rolled_race = ImGui::Button("生成比赛种子", ImVec2(150, 0));
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(360.0f);
-        ImGui::TextUnformatted("Rolls a fresh random seed and keeps the spoiler log hidden, "
-                               "following the usual race convention. Share the seed number with "
-                               "the other racers.");
+        ImGui::TextUnformatted("按通行比赛惯例生成一个全新随机种子，并隐藏剧透日志。"
+                               "把种子号码分享给其他参赛者。");
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset to vanilla", ImVec2(140, 0))) {
+    if (ImGui::Button("恢复原版", ImVec2(140, 0))) {
         Rando_Reset();
         sRandoResult[0] = '\0';
         sRandoSpoiler[0] = '\0';
@@ -2894,10 +2963,10 @@ static void DrawRibbonRandomizerTab(void) {
     ImGui::EndDisabled();
     if (rollInGameplay) {
         ImGui::SameLine();
-        ImGui::TextDisabled("(locked during gameplay)");
+        ImGui::TextDisabled("（游戏进行中锁定）");
     } else if (rollInFileSelect) {
-        ImGui::TextDisabled("On the file screen, roll from the L sidebar - it binds the seed to "
-                            "the new save slot. A roll here would be discarded.");
+        ImGui::TextDisabled("在存档画面请从 L 侧栏生成——它会把种子绑定到新存档槽。"
+                            "在这里生成的种子会被丢弃。");
     }
     if (rolled_normal || rolled_race) {
         if (rolled_race)
@@ -2908,23 +2977,23 @@ static void DrawRibbonRandomizerTab(void) {
         sRandoResultOk = (status == RANDO_OK);
         switch (status) {
             case RANDO_OK:
-                std::snprintf(sRandoResult, sizeof(sRandoResult), "Rolled seed %llu - verified beatable.%s",
-                              (unsigned long long)chosen, rolled_race ? " Spoiler log hidden (race)." : "");
+                std::snprintf(sRandoResult, sizeof(sRandoResult), "已生成种子 %llu——验证可通关。%s",
+                              (unsigned long long)chosen, rolled_race ? "剧透日志已隐藏（比赛）。" : "");
                 std::snprintf(sRandoSeedBuf, sizeof(sRandoSeedBuf), "%llu", (unsigned long long)chosen);
                 Rando_GetSpoiler(sRandoSpoiler, sizeof(sRandoSpoiler));
                 sRandoSpoilerHidden = rolled_race;
                 break;
             case RANDO_UNBEATABLE:
                 std::snprintf(sRandoResult, sizeof(sRandoResult),
-                              "No beatable arrangement found for this seed/settings "
-                              "(32 attempts) - previous state kept.");
+                              "未找到该种子/设置的可通关方案"
+                              "（尝试 32 次）——已保留先前状态。");
                 break;
             case RANDO_BAD_SETTINGS:
-                std::snprintf(sRandoResult, sizeof(sRandoResult), "Rejected: invalid settings combination.");
+                std::snprintf(sRandoResult, sizeof(sRandoResult), "已拒绝：设置组合无效。");
                 break;
             default:
                 std::snprintf(sRandoResult, sizeof(sRandoResult),
-                              "Generation failed (internal error) - see stderr log.");
+                              "生成失败（内部错误）——请查看 stderr 日志。");
                 break;
         }
     }
@@ -2941,18 +3010,18 @@ static void DrawRibbonRandomizerTab(void) {
     if (Rando_IsActive() && sRandoSpoiler[0]) {
         ImGui::Spacing();
         if (sRandoSpoilerHidden) {
-            ImGui::TextDisabled("Spoiler log hidden (race seed).");
+            ImGui::TextDisabled("剧透日志已隐藏（比赛种子）。");
             ImGui::SameLine();
-            if (ImGui::SmallButton("Reveal anyway"))
+            if (ImGui::SmallButton("仍然显示"))
                 sRandoSpoilerHidden = false;
-        } else if (ImGui::CollapsingHeader("Spoiler log")) {
-            if (ImGui::SmallButton("Copy to clipboard")) {
+        } else if (ImGui::CollapsingHeader("剧透日志")) {
+            if (ImGui::SmallButton("复制到剪贴板")) {
                 ImGui::SetClipboardText(sRandoSpoiler);
             }
             ImGui::SameLine();
             sRandoSpoilerFilter.Draw("##spoiler_filter", 180);
             ImGui::SameLine();
-            ImGui::TextDisabled("Filter");
+            ImGui::TextDisabled("筛选");
             ImGui::BeginChild("##rando_spoiler", ImVec2(0, 180), ImGuiChildFlags_Borders,
                               ImGuiWindowFlags_HorizontalScrollbar);
             if (sRandoSpoilerFilter.IsActive()) {
@@ -2997,27 +3066,24 @@ static void DrawRibbonAudioTab(void) {
     {
         float vol = Port_Audio_GetMasterVolume() * 100.0f;
         ImGui::SetNextItemWidth(200.0f);
-        if (ImGui::SliderFloat("Master volume", &vol, 0.0f, 100.0f, "%.0f%%")) {
+        if (ImGui::SliderFloat("主音量", &vol, 0.0f, 100.0f, "%.0f%%")) {
             float v = vol / 100.0f;
             Port_Audio_SetMasterVolume(v);
             Port_Config_SetMasterVolume(v);
         }
-        RandoUi_HelpTooltip("Scales the final mixed game audio. 100% = unchanged. Persists "
-                            "across launches. Leave at 100% for a faithful level match when "
-                            "A/B-testing against hardware in GBA-accurate mode.");
+        RandoUi_HelpTooltip("缩放最终混音后的游戏音频。100% = 保持不变。跨启动保留。"
+                            "在 GBA 精确模式下与实机进行 A/B 对比时，请保持 100% 以获得一致的响度。");
         ImGui::Separator();
     }
 
     bool gbaAccurate = Port_Audio_IsGbaAccurate();
-    if (ImGui::Checkbox("GBA-accurate audio", &gbaAccurate)) {
+    if (ImGui::Checkbox("GBA 精确音频", &gbaAccurate)) {
         Port_Audio_SetGbaAccurate(gbaAccurate);
     }
-    RandoUi_HelpTooltip("On: NEAREST resampling (the hardware's no-interpolation "
-                        "sample-and-hold 'crunch') and the output is handed straight to "
-                        "the device with no post-process DSP - for A/B comparison against "
-                        "real hardware / mGBA.\n\n"
-                        "Off (default): SINC resampling plus the DC-blocker / low-pass / "
-                        "stereo-widen / soft-clip chain tuned for modern speakers.");
+    RandoUi_HelpTooltip("开：NEAREST 重采样（硬件无插值的采样保持“颗粒感”），"
+                        "输出不经任何后处理 DSP 直达设备——用于与实机 / mGBA 进行 A/B 对比。\n\n"
+                        "关（默认）：SINC 重采样，外加针对现代音箱调校的 "
+                        "DC 阻隔 / 低通 / 立体声加宽 / 软限幅链。");
 
     ImGui::Separator();
 
@@ -3032,33 +3098,33 @@ static void DrawRibbonAudioTab(void) {
         // Stereo width
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Stereo width");
+        ImGui::Text("立体声宽度");
         ImGui::TableSetColumnIndex(1);
         float width = Port_Audio_GetWidth();
         ImGui::SetNextItemWidth(200.0f);
         if (ImGui::SliderFloat("##width", &width, 1.00f, 1.50f, "%.2f")) {
             Port_Audio_SetWidth(width);
         }
-        RandoUi_HelpTooltip("Mid/side stereo widening. 1.00 = mono image (reference), "
-                            "1.20 = default. The mid is never altered, so mono playback always "
-                            "collapses cleanly to the original mix. Lower values (~1.12) reduce "
-                            "hard-panned peak overshoot. No effect in GBA-accurate mode.");
+        RandoUi_HelpTooltip("中/侧立体声加宽。1.00 = 单声道形象（参考），"
+                            "1.20 = 默认。中声道从不改动，因此单声道播放总能"
+                            "干净地塌缩回原始混音。调低（约 1.12）可减少"
+                            "硬声像的峰值过冲。在 GBA 精确模式下无效。");
 
         // Reverb
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Reverb");
+        ImGui::Text("混响");
         ImGui::TableSetColumnIndex(1);
         int reverb = Port_Audio_GetReverbLevel();
         ImGui::SetNextItemWidth(200.0f);
         if (ImGui::SliderInt("##reverb", &reverb, 0, 24)) {
             Port_Audio_SetReverbLevel(reverb);
         }
-        RandoUi_HelpTooltip("Adds a short room tail to sampled (PCM) voices - drums, bass, "
-                            "some leads - while the chiptune PSG/CGB voices stay dry by the "
-                            "synth's mix order, so it adds space without muddying the melody. "
-                            "0 = off (default). ~12 is a gentle, musical amount. Applies live "
-                            "(does not restart the music). No effect in GBA-accurate mode.");
+        RandoUi_HelpTooltip("为采样的（PCM）音色——鼓、贝斯、部分主旋律——添加一点房间尾音，"
+                            "而芯片声 PSG/CGB 音色按合成器的混音顺序保持干声，"
+                            "所以只会增加空间感而不会浑浊旋律。\n"
+                            "0 = 关闭（默认）。约 12 是温和、有乐感的数值。即时生效（无需重启音乐）。"
+                            "在 GBA 精确模式下无效。");
 
         ImGui::EndTable();
     }
@@ -3066,9 +3132,8 @@ static void DrawRibbonAudioTab(void) {
     ImGui::EndDisabled();
     ImGui::Separator();
 
-    ImGui::TextWrapped("Per-category SFX mutes. Each toggle suppresses "
-                       "the matching sound IDs at the SoundReq / EnqueueSFX "
-                       "entry points - music and other SFX are untouched.");
+    ImGui::TextWrapped("按类别静音音效。每个开关都会在 SoundReq / EnqueueSFX "
+                       "入口抑制对应的声音 ID——音乐与其他音效不受影响。");
     ImGui::Separator();
 
     if (ImGui::BeginTable("##sfx_mutes", 2, ImGuiTableFlags_SizingFixedFit)) {
@@ -3098,46 +3163,45 @@ static void DrawRibbonAccessibilityTab(void) {
     Port_TTS_Init(); /* idempotent — safe if main.c already initialised */
     const char* backendName = Port_TTS_GetBackendName();
 
-    ImGui::TextWrapped("Text-to-speech reads important UI labels aloud (focused "
-                       "buttons, dialogs, errors). Toggle off at any time. Default "
-                       "off; settings persist across launches.");
+    ImGui::TextWrapped("文字转语音会朗读重要的界面标签（当前聚焦的按钮、"
+                       "对话框、错误提示）。可随时关闭。默认关闭；设置会跨启动保留。");
     ImGui::Separator();
 
     if (ImGui::BeginTable("##tts_table", 2, ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-        ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("标签", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("控件", ImGuiTableColumnFlags_WidthStretch);
 
         // Backend row
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Backend");
+        ImGui::Text("后端");
         ImGui::TableSetColumnIndex(1);
         if (backendName) {
             ImGui::TextUnformatted(backendName);
             if (std::strcmp(backendName, "NVDA") == 0) {
                 ImGui::SameLine();
-                ImGui::TextDisabled("(rate/pitch/volume ignored - NVDA controls those)");
+                ImGui::TextDisabled("（语速/音调/音量由 NVDA 控制，此处无效）");
             }
         } else {
-            ImGui::TextDisabled("(unavailable - install spd-say / espeak-ng on Linux)");
+            ImGui::TextDisabled("（不可用——Linux 请安装 spd-say / espeak-ng）");
         }
 
         // Enable Row
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Enable TTS");
+        ImGui::Text("启用 TTS");
         ImGui::TableSetColumnIndex(1);
         bool on = Port_TTS_GetEnabled();
         if (ImGui::Checkbox("##enable_tts", &on)) {
             Port_TTS_SetEnabled(on);
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("(F7 toggles, F6 stops speech)");
+        ImGui::TextDisabled("（F7 开关，F6 停止朗读）");
 
         // Rate
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Rate");
+        ImGui::Text("语速");
         ImGui::TableSetColumnIndex(1);
         float rate = Port_TTS_GetRate();
         ImGui::SetNextItemWidth(200.0f);
@@ -3148,7 +3212,7 @@ static void DrawRibbonAccessibilityTab(void) {
         // Pitch
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Pitch");
+        ImGui::Text("音调");
         ImGui::TableSetColumnIndex(1);
         float pitch = Port_TTS_GetPitch();
         ImGui::SetNextItemWidth(200.0f);
@@ -3159,7 +3223,7 @@ static void DrawRibbonAccessibilityTab(void) {
         // Volume
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Volume");
+        ImGui::Text("音量");
         ImGui::TableSetColumnIndex(1);
         float volume = Port_TTS_GetVolume();
         ImGui::SetNextItemWidth(200.0f);
@@ -3180,7 +3244,7 @@ static void DrawRibbonAccessibilityTab(void) {
         }
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Voice");
+        ImGui::Text("语音");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(200.0f);
         if (ImGui::InputText("##voice", voiceBuf, sizeof(voiceBuf))) {
@@ -3190,7 +3254,7 @@ static void DrawRibbonAccessibilityTab(void) {
         // Language
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Language");
+        ImGui::Text("语言");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(100.0f);
         if (ImGui::InputText("##lang", langBuf, sizeof(langBuf))) {
@@ -3199,10 +3263,10 @@ static void DrawRibbonAccessibilityTab(void) {
 
         ImGui::EndTable();
     }
-    ImGui::TextDisabled("Voice IDs vary by backend (espeak: 'en+f2', say: 'Samantha', SAPI: 'Microsoft David').");
+    ImGui::TextDisabled("语音 ID 因后端而异（espeak：'en+f2'，say：'Samantha'，SAPI：'Microsoft David'）。");
 
     ImGui::Separator();
-    if (ImGui::Button("Test voice")) {
+    if (ImGui::Button("测试语音")) {
         PortTtsOptions o = {};
         o.rate = o.pitch = o.volume = 0.0f / 0.0f;
         o.dedupe = false;
@@ -3211,71 +3275,67 @@ static void DrawRibbonAccessibilityTab(void) {
                        &o);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Stop")) {
+    if (ImGui::Button("停止")) {
         Port_TTS_Stop();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Read focus")) {
+    if (ImGui::Button("朗读焦点")) {
         Port_TTS_Speak("Focus reader test. The focused control reads aloud as you Tab.", nullptr);
     }
 
     ImGui::Separator();
-    ImGui::TextWrapped("Navigation cues (for blind / low-vision players). On-demand keys "
-                       "in game: F10 scans nearby points of interest (chests, items, NPCs, "
-                       "animals, enemies, exits); Shift+F10 steps through them one at a "
-                       "time; Ctrl+F10 reads the surface under you, walls around you, and "
-                       "exits.");
-    if (ImGui::Button("Scan surroundings (F10)")) {
+    ImGui::TextWrapped("导航提示（面向盲人 / 低视力玩家）。游戏中的按键：F10 扫描附近的"
+                       "关注点（宝箱、道具、NPC、动物、敌人、出口）；Shift+F10 逐个播报；"
+                       "Ctrl+F10 播报脚下的地面、四周的墙壁与出口。");
+    if (ImGui::Button("扫描周围（F10）")) {
         Port_A11y_ScanSurroundings();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cycle (Shift+F10)")) {
+    if (ImGui::Button("逐个播报（Shift+F10）")) {
         Port_A11y_CycleNext();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Look around (Ctrl+F10)")) {
+    if (ImGui::Button("环顾四周（Ctrl+F10）")) {
         Port_A11y_LookAround();
     }
 
     ImGui::Spacing();
-    ImGui::TextWrapped("Passive cues play automatically as you move: a tonal enemy radar "
-                       "(stereo pan = direction, pitch = distance), footstep sounds tinted "
-                       "by surface, fall-hazard warnings, and wall bumps.");
+    ImGui::TextWrapped("被动提示会在移动时自动播放：音调式敌人雷达（左右声道定位方向，"
+                       "音高表示距离）、按地面类型变化的脚步声、坠落危险警告与撞墙提示。");
     {
         bool b;
         b = Port_A11y_GetPassiveEnabled();
-        if (ImGui::Checkbox("Passive cues", &b))
+        if (ImGui::Checkbox("被动提示", &b))
             Port_A11y_SetPassiveEnabled(b);
         b = Port_A11y_GetFootstepsEnabled();
-        if (ImGui::Checkbox("Footsteps", &b))
+        if (ImGui::Checkbox("脚步声", &b))
             Port_A11y_SetFootstepsEnabled(b);
         ImGui::SameLine();
         b = Port_A11y_GetHazardsEnabled();
-        if (ImGui::Checkbox("Hazards", &b))
+        if (ImGui::Checkbox("危险警示", &b))
             Port_A11y_SetHazardsEnabled(b);
         ImGui::SameLine();
         b = Port_A11y_GetRadarEnabled();
-        if (ImGui::Checkbox("Enemy radar", &b))
+        if (ImGui::Checkbox("敌人雷达", &b))
             Port_A11y_SetRadarEnabled(b);
         ImGui::SameLine();
         b = Port_A11y_GetWallsEnabled();
-        if (ImGui::Checkbox("Walls", &b))
+        if (ImGui::Checkbox("墙壁", &b))
             Port_A11y_SetWallsEnabled(b);
     }
 
     ImGui::Separator();
-    ImGui::TextWrapped("Manual test plan:\n"
-                       "  1. Enable above, click Test voice - hear the test line.\n"
-                       "  2. Tab through this tab's controls - each label announces.\n"
-                       "  3. F7 toggles TTS without opening the menu.\n"
-                       "  4. F6 stops mid-utterance.\n"
-                       "  5. Open a save-overwrite dialog - modal is announced.");
+    ImGui::TextWrapped("手动测试步骤：\n"
+                       "  1. 启用上方选项，点击“测试语音”——应能听到测试句。\n"
+                       "  2. 用 Tab 在本页控件间移动——每个标签都会播报。\n"
+                       "  3. F7 无需打开菜单即可开关 TTS。\n"
+                       "  4. F6 中断当前朗读。\n"
+                       "  5. 打开覆盖存档的对话框——模态窗会被播报。");
 }
 
 static void DrawRibbonRebornTab(void) {
-    ImGui::TextWrapped("Quality-of-life features ported from Minish Cap Reborn "
-                       "(GPL-3.0); see THIRD-PARTY-LICENSES.md. Toggles persist "
-                       "until tmc_pc closes.");
+    ImGui::TextWrapped("从 Minish Cap Reborn（GPL-3.0）移植的便利功能；"
+                       "见 THIRD-PARTY-LICENSES.md。开关在 tmc_pc 关闭前持续生效。");
     ImGui::Separator();
     for (int i = 0; i < REBORN_FEAT_COUNT; ++i) {
         /* Slot 8 (rupee-like overhaul) was removed; its enum slot is kept so
@@ -3308,7 +3368,7 @@ static void DrawRibbonRebornTab(void) {
         ImGui::Indent(20.0f);
         float dz = Port_Config_GetAnalogDeadzone();
         ImGui::SetNextItemWidth(180.0f);
-        if (ImGui::SliderFloat("Analog deadzone", &dz, 0.0f, 0.95f, "%.2f")) {
+        if (ImGui::SliderFloat("摇杆死区", &dz, 0.0f, 0.95f, "%.2f")) {
             Port_Config_SetAnalogDeadzone(dz);
         }
         ImGui::SameLine();
@@ -3316,10 +3376,9 @@ static void DrawRibbonRebornTab(void) {
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos(360.0f);
-            ImGui::TextUnformatted("Left-stick displacement below this fraction is ignored, so the "
-                                   "D-pad stays authoritative and a thumb resting on the stick won't "
-                                   "drift. Raise it for a worn/drifty stick; lower it for a lighter "
-                                   "touch. Default 0.30.");
+            ImGui::TextUnformatted("左摇杆位移低于该比例的部分会被忽略，因此十字键仍保持权威，"
+                                   "拇指搭在摇杆上也不会漂移。摇杆磨损/漂移时调高它；"
+                                   "想要更灵敏的触感就调低。默认 0.30。");
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
@@ -3331,44 +3390,43 @@ static void DrawRibbonRebornTab(void) {
 static void Practice_FormatFrames(unsigned long long frames, char* out, size_t cap);
 
 static void DrawRibbonPracticeTab(void) {
-    ImGui::TextWrapped("Speedrun practice tools. Overlays draw over the game "
-                       "whenever their toggle is on (independent of this menu).");
+    ImGui::TextWrapped("速通练习工具。开启后覆盖层会叠加显示在游戏画面上（与本菜单无关）。");
     ImGui::Separator();
 
-    ImGui::SeparatorText("Overlays");
+    ImGui::SeparatorText("覆盖层");
     bool t = Port_Config_GetPracticeShowTimer();
-    if (ImGui::Checkbox("Show IGT timer", &t))
+    if (ImGui::Checkbox("显示 IGT 计时器", &t))
         Port_Config_SetPracticeShowTimer(t);
     bool in = Port_Config_GetPracticeShowInputs();
-    if (ImGui::Checkbox("Show input display", &in))
+    if (ImGui::Checkbox("显示输入", &in))
         Port_Config_SetPracticeShowInputs(in);
     bool h = Port_Config_GetPracticeShowHistory();
-    if (ImGui::Checkbox("Show input history", &h))
+    if (ImGui::Checkbox("显示输入历史", &h))
         Port_Config_SetPracticeShowHistory(h);
 
-    ImGui::SeparatorText("Timer");
+    ImGui::SeparatorText("计时器");
     char buf[32];
     Practice_FormatFrames(Port_Practice_ElapsedFrames(), buf, sizeof(buf));
-    ImGui::Text("Elapsed: %s  (%llu frames)", buf, (unsigned long long)Port_Practice_ElapsedFrames());
-    if (ImGui::Button(Port_Practice_TimerRunning() ? "Stop" : "Start"))
+    ImGui::Text("已计时：%s（%llu 帧）", buf, (unsigned long long)Port_Practice_ElapsedFrames());
+    if (ImGui::Button(Port_Practice_TimerRunning() ? "停止" : "开始"))
         Port_Practice_TimerToggle();
     ImGui::SameLine();
-    if (ImGui::Button("Reset timer"))
+    if (ImGui::Button("重置计时器"))
         Port_Practice_TimerReset();
     ImGui::SameLine();
-    if (ImGui::Button("Split"))
+    if (ImGui::Button("分段"))
         Port_Practice_AddSplit();
 
     int nsplits = Port_Practice_SplitCount();
     if (nsplits > 0) {
         ImGui::SameLine();
-        if (ImGui::Button("Clear splits"))
+        if (ImGui::Button("清除分段"))
             Port_Practice_ClearSplits();
         if (ImGui::BeginTable("##splits", 3,
                               ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("#");
-            ImGui::TableSetupColumn("Time");
-            ImGui::TableSetupColumn("Delta");
+            ImGui::TableSetupColumn("时间");
+            ImGui::TableSetupColumn("差值");
             ImGui::TableHeadersRow();
             unsigned long long prev = 0;
             for (int i = 0; i < nsplits; ++i) {
@@ -3389,34 +3447,34 @@ static void DrawRibbonPracticeTab(void) {
         }
     }
 
-    ImGui::SeparatorText("Practice point");
-    if (ImGui::Button("Set point")) {
+    ImGui::SeparatorText("练习点");
+    if (ImGui::Button("设置练习点")) {
         if (Port_Practice_SetPoint())
-            Port_DebugMenu_ToastFromExternal("Practice point set");
+            Port_DebugMenu_ToastFromExternal("练习点已设置");
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(!Port_Practice_HasPoint());
-    if (ImGui::Button("Reload point")) {
-        Port_DebugMenu_ToastFromExternal(Port_Practice_LoadPoint() ? "Practice point loaded" : "Reload failed");
+    if (ImGui::Button("读取练习点")) {
+        Port_DebugMenu_ToastFromExternal(Port_Practice_LoadPoint() ? "练习点已读取" : "读取失败");
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::TextDisabled(Port_Practice_HasPoint() ? "(set)" : "(empty)");
+    ImGui::TextDisabled(Port_Practice_HasPoint() ? "（已设置）" : "（空）");
 
-    ImGui::SeparatorText("Speed");
+    ImGui::SeparatorText("速度");
     float sm = Port_Config_GetPracticeSlowmo();
-    if (ImGui::SliderFloat("Slow-mo", &sm, 0.1f, 1.0f, "%.2fx")) {
+    if (ImGui::SliderFloat("慢动作", &sm, 0.1f, 1.0f, "%.2fx")) {
         Port_Config_SetPracticeSlowmo(sm);
     }
     ImGui::SameLine();
     if (ImGui::Button("1x"))
         Port_Config_SetPracticeSlowmo(1.0f);
-    if (ImGui::Button(Port_Practice_IsPaused() ? "Resume" : "Pause"))
+    if (ImGui::Button(Port_Practice_IsPaused() ? "继续" : "暂停"))
         Port_Practice_TogglePause();
 
-    ImGui::SeparatorText("Hotkeys");
-    ImGui::TextDisabled("Keyboard:  [ set point   ] reload   P pause   . frame-advance   ' reset   ; split\n"
-                        "Gamepad:   hold Select + A reload / B set / X pause / Y advance / D-Up reset / D-Down split");
+    ImGui::SeparatorText("快捷键");
+    ImGui::TextDisabled("键盘：  [ 设置练习点   ] 读取   P 暂停   . 逐帧   ' 重置   ; 分段\n"
+                        "手柄：  按住 Select + A 读取 / B 设置 / X 暂停 / Y 逐帧 / 十字键上 重置 / 十字键下 分段");
 }
 
 /* Read-only entity viewer (#feature). Snapshots all live entities each frame
@@ -3568,37 +3626,37 @@ static void DrawRibbon(void) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.20f, 0.20f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.75f, 0.30f, 0.30f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.35f, 0.35f, 1.0f));
-        if (ImGui::Button("Close X", ImVec2(closeW, 0))) {
+        if (ImGui::Button("关闭", ImVec2(closeW, 0))) {
             Port_DebugMenu_Toggle();
         }
         ImGui::PopStyleColor(3);
 
         if (ImGui::BeginTabBar("##ribbonTabs", ImGuiTabBarFlags_None)) {
-            if (ImGui::BeginTabItem("Items")) {
+            if (ImGui::BeginTabItem("物品")) {
                 DrawRibbonItemsTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Display")) {
+            if (ImGui::BeginTabItem("显示")) {
                 DrawRibbonDisplayTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Saves")) {
+            if (ImGui::BeginTabItem("存档")) {
                 DrawRibbonSavesTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Profiles")) {
+            if (ImGui::BeginTabItem("资料")) {
                 DrawRibbonProfilesTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Equip")) {
+            if (ImGui::BeginTabItem("装备")) {
                 DrawRibbonEquipTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Controls")) {
+            if (ImGui::BeginTabItem("控制")) {
                 DrawRibbonControlsTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Warp")) {
+            if (ImGui::BeginTabItem("传送")) {
                 DrawRibbonWarpTab();
                 ImGui::EndTabItem();
             }
@@ -3614,15 +3672,15 @@ static void DrawRibbon(void) {
                 DrawRibbonMemoryTab();
                 ImGui::EndTabItem();
             }
-            if ((!Rando_IsInGameplay() || Rando_IsActive()) && ImGui::BeginTabItem("Randomizer")) {
+            if ((!Rando_IsInGameplay() || Rando_IsActive()) && ImGui::BeginTabItem("随机化")) {
                 DrawRibbonRandomizerTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Audio")) {
+            if (ImGui::BeginTabItem("音频")) {
                 DrawRibbonAudioTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Accessibility")) {
+            if (ImGui::BeginTabItem("无障碍")) {
                 DrawRibbonAccessibilityTab();
                 ImGui::EndTabItem();
             }
@@ -3630,7 +3688,7 @@ static void DrawRibbon(void) {
                 DrawRibbonRebornTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Practice")) {
+            if (ImGui::BeginTabItem("练习")) {
                 DrawRibbonPracticeTab();
                 ImGui::EndTabItem();
             }
@@ -3639,13 +3697,13 @@ static void DrawRibbon(void) {
         /* Footer with the mode toggle + hotkey hint. */
         ImGui::Separator();
         bool useRibbon = sRibbonEnabled;
-        if (ImGui::Checkbox("Ribbon mode (uncheck for classic menu)", &useRibbon)) {
+        if (ImGui::Checkbox("功能区模式（取消勾选可切换经典菜单）", &useRibbon)) {
             sRibbonEnabled = useRibbon;
             Port_Config_SetRibbonEnabled(useRibbon); /* persist (#146) */
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("(F8 or Select+Start also toggles)");
-        ImGui::TextDisabled("F5/F6 quicksave/load   F9 bug report   -   see the Controls tab for all hotkeys");
+        ImGui::TextDisabled("（F8 或 Select+Start 也可开关）");
+        ImGui::TextDisabled("F5/F6 快速存档/读档   F9 错误报告   ——  全部热键见“控制”页");
     }
     ImGui::End();
     ImGui::PopStyleVar();
@@ -3797,10 +3855,10 @@ static void DrawPracticeOverlay(void) {
             ImGui::TextDisabled("(%llu)", (unsigned long long)Port_Practice_ElapsedFrames());
             if (Port_Practice_IsPaused()) {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "PAUSED");
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "已暂停");
             } else if (!Port_Practice_TimerRunning()) {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "STOP");
+                ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "停止");
             }
         }
         ImGui::End();
@@ -3881,10 +3939,10 @@ static void DrawMenuPage(int depth) {
 
         ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-        ImGui::TextUnformatted("Up/Dn move  Enter activate  L/R cycle  Esc back");
-        ImGui::TextUnformatted("Double-click activate  Right-click cycle");
+        ImGui::TextUnformatted("↑/↓ 移动  Enter 确认  L/R 循环  Esc 返回");
+        ImGui::TextUnformatted("双击确认  右键循环");
         if (depth == 0)
-            ImGui::TextUnformatted("F5/F6 quicksave/load   F9 bug report   (Controls tab: all keys)");
+            ImGui::TextUnformatted("F5/F6 快速存档/读档   F9 错误报告   （全部按键见“控制”页）");
         ImGui::PopStyleColor();
     }
     ImGui::End();
@@ -3948,13 +4006,13 @@ static void DrawMenuTrigger(void) {
         /* Closed: single triple-bar ASCII '=' stacked into a hamburger
          * shape (the default ImGui font doesn't ship U+2261 ≡). First run:
          * spelled-out "Settings (F8)". Open: clear close label. */
-        const char* label = open ? " CLOSE MENU " : (showHint ? " Settings  (F8) " : "[=]");
+        const char* label = open ? " 关闭菜单 " : (showHint ? " 设置（F8） " : "[=]");
         if (ImGui::Button(label)) {
             Port_DebugMenu_Toggle();
         }
         if (open) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
-            ImGui::TextUnformatted("Gamepad: D-pad nav   A activate   B back");
+            ImGui::TextUnformatted("手柄：十字键导航  A 确认  B 返回");
             ImGui::PopStyleColor();
         }
     }
@@ -3989,32 +4047,30 @@ extern "C" void Port_ImGui_RequestQuitModal(void) {
 
 static void DrawQuitModal(void) {
     if (sQuitModalArmed) {
-        ImGui::OpenPopup("Quit?");
+        ImGui::OpenPopup("退出？");
         sQuitModalArmed = false;
     }
     /* Centre the popup. */
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Quit?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
-        ImGui::TextUnformatted("Save before quitting?");
+    if (ImGui::BeginPopupModal("退出？", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+        ImGui::TextUnformatted("退出前要保存吗？");
         ImGui::Separator();
-        ImGui::TextWrapped("Save & Quit writes the current game state to "
-                           "quicksave slot 0 (F6 to reload). Quit Without "
-                           "Saving exits immediately - any progress since "
-                           "your last in-game save is lost.");
+        ImGui::TextWrapped("“保存并退出”会把当前游戏状态写入快速存档槽 0（按 F6 读取）。"
+                           "“不保存退出”会立即结束游戏——自上次游戏内保存以来的所有进度都会丢失。");
         ImGui::Spacing();
-        if (ImGui::Button("Save & Quit", ImVec2(140, 0))) {
+        if (ImGui::Button("保存并退出", ImVec2(140, 0))) {
             Port_QuickSave_SaveSlot(0);
             sQuitModalConfirmed = true;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Quit Without Saving", ImVec2(180, 0))) {
+        if (ImGui::Button("不保存退出", ImVec2(180, 0))) {
             sQuitModalConfirmed = true;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+        if (ImGui::Button("取消", ImVec2(100, 0))) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -4046,25 +4102,24 @@ static void DrawRandoFileMenuModal(void) {
                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings)) {
 
-        ImGui::TextColored(ImVec4(0.78f, 0.95f, 0.78f, 1.0f), "PORT & RANDOMIZER SETUP");
+        ImGui::TextColored(ImVec4(0.78f, 0.95f, 0.78f, 1.0f), "PC 移植版与随机化设置");
         ImGui::Separator();
 
         // Randomizer checkbox (toggle rando vs vanilla)
         bool randoEnabled = Port_RandoFileMenu_GetRandoOptionEnabled();
-        if (ImGui::Checkbox("Enable Randomizer Mode", &randoEnabled)) {
+        if (ImGui::Checkbox("启用随机化模式", &randoEnabled)) {
             Port_RandoFileMenu_SetRandoOptionEnabled(randoEnabled);
         }
-        RandoUi_HelpTooltip("On: Starting a new save slot will roll a randomized seed using "
-                            "the settings below.\n\n"
-                            "Off (default): New slots start as a normal, unmodified vanilla game.");
+        RandoUi_HelpTooltip("开：开始新存档时，会按下列设置生成一个随机化种子。\n\n"
+                            "关（默认）：新存档以正常、未修改的原版游戏开始。");
 
         ImGui::Separator();
 
         // 1. RANDOMIZER SETUP SECTION (Only active if enabled)
         if (randoEnabled) {
-            if (ImGui::CollapsingHeader("Randomizer Setup", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::CollapsingHeader("随机化设置", ImGuiTreeNodeFlags_DefaultOpen)) {
                 ImGui::SetNextItemWidth(180);
-                if (ImGui::InputText("Seed (empty = random)", Port_RandoFileMenu_SeedBuffer(),
+                if (ImGui::InputText("种子（留空 = 随机）", Port_RandoFileMenu_SeedBuffer(),
                                      RANDO_FILE_MENU_SEED_MAX + 1, ImGuiInputTextFlags_EnterReturnsTrue)) {
                     Port_RandoFileMenu_SeedEdited();
                     Port_RandoFileMenu_CommitAndStart();
@@ -4072,51 +4127,50 @@ static void DrawRandoFileMenuModal(void) {
                 if (ImGui::IsItemEdited())
                     Port_RandoFileMenu_SeedEdited();
                 ImGui::SameLine();
-                if (ImGui::Button("Randomize"))
+                if (ImGui::Button("随机生成"))
                     Port_RandoFileMenu_RandomizeSeed();
 
                 ImGui::Spacing();
-                ImGui::TextDisabled("Logic: built-in native graph (%d locations)", RANDO_LOCATION_COUNT);
+                ImGui::TextDisabled("逻辑：内建原生图（%d 个地点）", RANDO_LOCATION_COUNT);
                 int difficulty = Port_RandoFileMenu_Difficulty();
                 ImGui::SetNextItemWidth(160);
-                if (ImGui::Combo("Item pool", &difficulty, kRandoPoolCombo, RANDO_ITEM_POOL_COUNT)) {
+                if (ImGui::Combo("道具池", &difficulty, kRandoPoolCombo, RANDO_ITEM_POOL_COUNT)) {
                     Port_RandoFileMenu_SetDifficulty(difficulty);
                 }
                 RandoUi_HelpTooltip(kRandoPoolTooltip);
-                ImGui::Checkbox("Glitchless logic", Port_RandoFileMenu_GlitchlessLogic());
+                ImGui::Checkbox("无故障逻辑", Port_RandoFileMenu_GlitchlessLogic());
                 ImGui::SameLine();
-                ImGui::Checkbox("Obscure spots", Port_RandoFileMenu_ObscureLocations());
+                ImGui::Checkbox("冷门地点", Port_RandoFileMenu_ObscureLocations());
                 ImGui::SameLine();
-                ImGui::Checkbox("Kinstones", Port_RandoFileMenu_ShuffleKinstones());
+                ImGui::Checkbox("Kinstone 随机", Port_RandoFileMenu_ShuffleKinstones());
                 ImGui::SameLine();
-                ImGui::Checkbox("Entrances", Port_RandoFileMenu_ShuffleEntrances());
+                ImGui::Checkbox("出入口随机", Port_RandoFileMenu_ShuffleEntrances());
                 ImGui::SameLine();
-                ImGui::Checkbox("Dojos", Port_RandoFileMenu_ShuffleDojos());
-                ImGui::Checkbox("Dungeon items", Port_RandoFileMenu_ShuffleDungeonItems());
-                RandoUi_HelpTooltip("Off (default): each dungeon's map, compass, and big key stay "
-                                    "in their vanilla chests. On: they join the shuffle and can be "
-                                    "found in any dungeon (each is credited to its home dungeon).");
-                ImGui::Checkbox("Open world", Port_RandoFileMenu_OpenWorld());
-                RandoUi_HelpTooltip("Every permanent obstacle (trees, cracked blocks, bomb "
-                                    "walls, switches, non-key doors, ...) starts pre-solved, "
-                                    "matching the GBA randomizer's World Settings \"Open\".");
+                ImGui::Checkbox("道场随机", Port_RandoFileMenu_ShuffleDojos());
+                ImGui::Checkbox("迷宫道具随机", Port_RandoFileMenu_ShuffleDungeonItems());
+                RandoUi_HelpTooltip("关（默认）：每个迷宫的地图、罗盘与大钥匙留在原版的宝箱里。\n"
+                                    "开：它们加入随机池，可能出现在任意迷宫"
+                                    "（拾取时计入其所属迷宫）。");
+                ImGui::Checkbox("开放世界", Port_RandoFileMenu_OpenWorld());
+                RandoUi_HelpTooltip("所有永久障碍（树木、裂纹石块、炸弹墙、开关、非钥匙门……）"
+                                    "开局即已解除，与 GBA 随机化的 World Settings「Open」一致。");
                 ImGui::SameLine();
-                ImGui::Checkbox("Sleep warp", Port_RandoFileMenu_Homewarp());
-                ImGui::Checkbox("Start Sword", Port_RandoFileMenu_StartSword());
+                ImGui::Checkbox("睡眠传送", Port_RandoFileMenu_Homewarp());
+                ImGui::Checkbox("开局带 Smith's Sword", Port_RandoFileMenu_StartSword());
                 ImGui::SameLine();
-                ImGui::Checkbox("Early Crests", Port_RandoFileMenu_EarlyCrests());
+                ImGui::Checkbox("提前获得 Wind Crests", Port_RandoFileMenu_EarlyCrests());
                 ImGui::SameLine();
-                ImGui::Checkbox("Fast Text", Port_RandoFileMenu_InstantText());
+                ImGui::Checkbox("快速文本", Port_RandoFileMenu_InstantText());
 
-                static const char* kTunicColors[] = { "Green", "Red", "Blue", "Purple", "Orange", "Grey", "Random" };
-                static const char* kHeartColors[] = { "Red", "Blue", "Green", "Yellow", "Purple", "Rainbow", "Random" };
+                static const char* kTunicColors[] = { "绿", "红", "蓝", "紫", "橙", "灰", "随机" };
+                static const char* kHeartColors[] = { "红", "蓝", "绿", "黄", "紫", "彩虹", "随机" };
                 ImGui::SetNextItemWidth(160);
-                ImGui::Combo("Tunic color", Port_RandoFileMenu_TunicColor(), kTunicColors, 7);
+                ImGui::Combo("上衣颜色", Port_RandoFileMenu_TunicColor(), kTunicColors, 7);
                 ImGui::SetNextItemWidth(160);
-                ImGui::Combo("Heart color", Port_RandoFileMenu_HeartColor(), kHeartColors, 7);
+                ImGui::Combo("心形颜色", Port_RandoFileMenu_HeartColor(), kHeartColors, 7);
 
                 ImGui::SetNextItemWidth(160);
-                ImGui::Combo("Accessibility", Port_RandoFileMenu_Accessibility(), kRandoAccessCombo,
+                ImGui::Combo("可达性", Port_RandoFileMenu_Accessibility(), kRandoAccessCombo,
                              RANDO_ACCESS_COUNT);
                 RandoUi_HelpTooltip(kRandoAccessTooltip);
                 if (!*Port_RandoFileMenu_GlitchlessLogic()) {
@@ -4128,8 +4182,8 @@ static void DrawRandoFileMenuModal(void) {
 
                 if (*Port_RandoFileMenu_GlitchlessLogic() &&
                     Port_RandoFileMenu_Difficulty() > (int)RANDO_ITEM_POOL_NORMAL) {
-                    ImGui::TextDisabled("Glitchless ON: pool only scrambles collectibles\n"
-                                        "(guaranteed beatable). Uncheck for full scrambling.");
+                    ImGui::TextDisabled("无故障逻辑已开启：道具池只随机收集品\n"
+                                        "（保证可通关）。取消勾选可进行完整乱序。");
                 }
 
                 ImGui::Spacing();
@@ -4141,11 +4195,11 @@ static void DrawRandoFileMenuModal(void) {
                 {
                     char sfp[16];
                     std::snprintf(sfp, sizeof(sfp), "%08X", Port_RandoFileMenu_Fingerprint());
-                    ImGui::Text("Fingerprint: %s", sfp);
-                    RandoUi_HelpTooltip("Hash of every placement-affecting setting. Share it with "
-                                        "a friend: same seed AND same fingerprint = identical world.");
+                    ImGui::Text("指纹：%s", sfp);
+                    RandoUi_HelpTooltip("影响布局的每一项设置的哈希。与朋友分享："
+                                        "种子相同且指纹相同 = 完全相同的世界。");
                     ImGui::SameLine();
-                    if (ImGui::SmallButton("Copy##fpsidebar")) {
+                    if (ImGui::SmallButton("复制##fpsidebar")) {
                         ImGui::SetClipboardText(sfp);
                     }
                 }
@@ -4154,33 +4208,33 @@ static void DrawRandoFileMenuModal(void) {
                     /* Only show Generate/Cancel actions when the GBA state is actively
                      * waiting for input on a new file creation slot. */
                     const float actionW = (sidebarW - 32.0f) / 2.0f;
-                    if (ImGui::Button("Generate & Start", ImVec2(actionW, 0))) {
+                    if (ImGui::Button("生成并开始", ImVec2(actionW, 0))) {
                         Port_RandoFileMenu_CommitAndStart();
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button("Cancel", ImVec2(actionW, 0))) {
+                    if (ImGui::Button("取消", ImVec2(actionW, 0))) {
                         Port_RandoFileMenu_Cancel();
                     }
-                    ImGui::TextDisabled("Enter starts   Esc / Gamepad B cancels");
+                    ImGui::TextDisabled("Enter 开始   Esc / 手柄 B 取消");
                 } else {
-                    ImGui::TextDisabled("Options will apply to your next new save file.");
+                    ImGui::TextDisabled("选项将应用于你的下一个新建存档。");
                 }
             }
         } else {
-            ImGui::TextDisabled("Randomizer: disabled (Vanilla game).");
+            ImGui::TextDisabled("随机化：已禁用（原版游戏）。");
         }
 
         // 2. GENERAL PORT SETTINGS (Always available)
-        if (ImGui::CollapsingHeader("Display & Video")) {
+        if (ImGui::CollapsingHeader("显示与视频")) {
             DrawRibbonDisplayTab();
         }
-        if (ImGui::CollapsingHeader("Audio & Sound")) {
+        if (ImGui::CollapsingHeader("音频与声音")) {
             DrawRibbonAudioTab();
         }
-        if (ImGui::CollapsingHeader("Save Profiles")) {
+        if (ImGui::CollapsingHeader("存档资料")) {
             DrawRibbonProfilesTab();
         }
-        if (ImGui::CollapsingHeader("Accessibility")) {
+        if (ImGui::CollapsingHeader("无障碍")) {
             DrawRibbonAccessibilityTab();
         }
 
@@ -4211,7 +4265,7 @@ static void DrawRandoFileMenuModal(void) {
             }
         } else {
             /* Close button for the sidebar when opened manually */
-            if (ImGui::Button("Close Sidebar", ImVec2(-1, 30))) {
+            if (ImGui::Button("关闭侧栏", ImVec2(-1, 30))) {
                 Port_RandoFileMenu_SetSidebarOpen(false);
                 Rando_PlayCancelSfx();
             }
@@ -4297,7 +4351,7 @@ extern "C" bool Port_ImGui_Render(void) {
         if (ImGui::Begin("##softslot_config", nullptr,
                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings)) {
-            ImGui::TextColored(ImVec4(0.78f, 0.86f, 1.0f, 1.0f), "EXTRA EQUIP SLOTS");
+            ImGui::TextColored(ImVec4(0.78f, 0.86f, 1.0f, 1.0f), "额外装备槽");
             ImGui::Separator();
             for (int s = 0; s < 4; ++s) {
                 ImGui::PushID(s);
@@ -4307,7 +4361,7 @@ extern "C" bool Port_ImGui_Render(void) {
                 ImGui::PopID();
             }
             ImGui::Separator();
-            ImGui::TextDisabled("Up/Down pick   Left/Right cycle   Enter/Esc done");
+            ImGui::TextDisabled("↑/↓ 选择   ←/→ 切换   Enter/Esc 完成");
             if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
                 Port_SoftSlots_ConfigClose();
             }
@@ -4332,7 +4386,7 @@ extern "C" bool Port_ImGui_Render(void) {
         if (ImGui::Begin("##rando_l_hint", nullptr,
                          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                              ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextColored(ImVec4(0.85f, 0.95f, 0.85f, 1.0f), "Press  L  for Port & Randomizer setup");
+            ImGui::TextColored(ImVec4(0.85f, 0.95f, 0.85f, 1.0f), "按 L 打开 PC 移植版与随机化设置");
         }
         ImGui::End();
     }
@@ -4366,7 +4420,7 @@ extern "C" bool Port_ImGui_Render(void) {
             if (ImGui::Begin("##classic_to_ribbon", nullptr,
                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
                                  ImGuiWindowFlags_NoSavedSettings)) {
-                if (ImGui::SmallButton("Switch to ribbon mode")) {
+                if (ImGui::SmallButton("切换回功能区模式")) {
                     sRibbonEnabled = true;
                     Port_Config_SetRibbonEnabled(true); /* persist (#146) */
                 }
@@ -4476,7 +4530,7 @@ extern "C" bool Port_ImGui_RenderExtractProgress(const char* phase, float fracti
                          ImGuiWindowFlags_NoScrollbar)) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.40f, 0.72f, 0.46f, 1.00f));
         ImGui::SetWindowFontScale(1.6f);
-        ImGui::TextUnformatted("Extracting game assets");
+        ImGui::TextUnformatted("正在提取游戏资源");
         ImGui::SetWindowFontScale(1.0f);
         ImGui::PopStyleColor();
 
@@ -4486,12 +4540,12 @@ extern "C" bool Port_ImGui_RenderExtractProgress(const char* phase, float fracti
         ImGui::Dummy(ImVec2(0, 4));
 
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.78f, 0.70f, 1.00f));
-        ImGui::Text("loading %s   (phase %d/%d)", (phase && phase[0]) ? phase : "preparing", phase_index, phase_total);
+        ImGui::Text("正在加载 %s（阶段 %d/%d）", (phase && phase[0]) ? phase : "准备中", phase_index, phase_total);
         ImGui::PopStyleColor();
 #ifdef __ANDROID__
-        ImGui::TextDisabled("One-time setup - this can take a minute on first launch.");
+        ImGui::TextDisabled("一次性设置——首次启动可能需要一分钟。");
 #else
-        ImGui::TextDisabled("One-time first-launch extraction. See terminal for detail.");
+        ImGui::TextDisabled("首次启动的一次性提取。详情见终端。");
 #endif
     }
     ImGui::End();
@@ -4573,7 +4627,7 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
         ImGui::PopStyleColor();
 
         ImGui::PushStyleColor(ImGuiCol_Text, subtxt);
-        CenteredText("Minish Cap PC Port");
+        CenteredText("《缩小帽》PC 移植版");
         ImGui::PopStyleColor();
 
         ImGui::Dummy(ImVec2(0, 16));
@@ -4582,7 +4636,7 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
 
         if (rom_present) {
             ImGui::PushStyleColor(ImGuiCol_Text, subtxt);
-            ImGui::TextUnformatted("Version");
+            ImGui::TextUnformatted("版本");
             ImGui::PopStyleColor();
             ImGui::SameLine(170.0f);
             ImGui::TextUnformatted(version ? version : "?");
@@ -4595,7 +4649,7 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
             ImGui::SameLine();
             /* Right-align the Change-ROM button to the edge of the card. */
             {
-                const char* lbl = "Change ROM...";
+                const char* lbl = "更换 ROM…";
                 float bw = ImGui::CalcTextSize(lbl).x + ImGui::GetStyle().FramePadding.x * 2.0f;
                 float pad = ImGui::GetStyle().WindowPadding.x;
                 ImGui::SameLine(win_w - pad - bw);
@@ -4609,9 +4663,9 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
              * "Select your Minish Cap ROM" prompt + big button. No Play
              * yet — there's nothing to play. */
             ImGui::PushStyleColor(ImGuiCol_Text, subtxt);
-            CenteredText("No ROM found.");
-            CenteredText("Project Picori needs your own Minish Cap dump (.gba).");
-            CenteredText("We identify it by SHA-1 - filename is irrelevant.");
+            CenteredText("未找到 ROM。");
+            CenteredText("Project Picori 需要你自己的《缩小帽》游戏转储（.gba）。");
+            CenteredText("我们通过 SHA-1 识别文件——文件名无关紧要。");
             ImGui::PopStyleColor();
         }
         ImGui::Dummy(ImVec2(0, 14));
@@ -4623,7 +4677,7 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
          * ROM when none. Enter / Space activates whichever is shown. */
         {
             const bool is_select = !rom_present;
-            const char* lbl = is_select ? "Select ROM..." : "Play";
+            const char* lbl = is_select ? "选择 ROM…" : "开始";
             const ImVec2 sz(is_select ? 260.0f : 220.0f, 48.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.42f, 0.24f, 1.0f));
@@ -4649,8 +4703,8 @@ extern "C" bool Port_ImGui_RenderPrelaunch(bool rom_present, const char* version
 
         ImGui::Dummy(ImVec2(0, 6));
         ImGui::PushStyleColor(ImGuiCol_Text, subtxt);
-        CenteredText(rom_present ? "Press Enter or click Play to start"
-                                 : "Press Enter or click to pick your .gba file");
+        CenteredText(rom_present ? "按 Enter 或点击“开始”启动"
+                                 : "按 Enter 或点击选择你的 .gba 文件");
         ImGui::PopStyleColor();
     }
     ImGui::End();

@@ -636,11 +636,10 @@ RomRegion Port_DetectRomRegion(const u8* romData, u32 romSize) {
         /* JP binary (or fat multi-region binary): use JP offsets, but refuse to
          * proceed if the table is still the unpopulated placeholder. */
         if (kRomOffsets_JP.gfxAndPalettes == 0) {
-            Port_FatalRomError("Minish Cap PC Port - JP not yet supported",
-                               "This is a Japanese (BZMJ) ROM, but this build's JP data tables "
-                               "are not populated yet.\n\n"
-                               "Use a USA (BZME) or EU (BZMP) ROM for now. See "
-                               "docs/JP_PORT_ENABLEMENT.md for the JP status.");
+            Port_FatalRomError("缩小帽 PC 移植版 - 暂不支持日版",
+                               "这是日版（BZMJ）ROM，但本构建的日版数据表尚未填充。\n\n"
+                               "请暂时使用美版（BZME）或欧版（BZMP）ROM。\n"
+                               "日版支持状态参见 docs/JP_PORT_ENABLEMENT.md。");
         }
         gRomOffsets = &kRomOffsets_JP;
 
@@ -1334,10 +1333,10 @@ void Port_LoadRom(const char* path) {
                 if (!gRomData) {
                     char msg[160];
                     snprintf(msg, sizeof(msg),
-                             "Failed to allocate %u bytes for ROM.\n\n"
-                             "The system is out of memory.",
+                             "无法为 ROM 分配 %u 字节。\n\n"
+                             "系统内存不足。",
                              gRomSize);
-                    Port_FatalRomError("Minish Cap PC Port - ROM allocation failed", msg);
+                    Port_FatalRomError("缩小帽 PC 移植版 - ROM 内存分配失败", msg);
                 }
             }
             if (fileSize <= gRomSize) {
@@ -1394,15 +1393,15 @@ void Port_LoadRom(const char* path) {
      * as a fatal dialog rather than letting the engine boot into a
      * black screen. */
     if (!romLoaded) {
-        Port_FatalRomError("Minish Cap PC Port - ROM not found",
-                           "Could not load baserom.gba.\n\n"
-                           "Place baserom.gba (USA) or baserom_eu.gba (EU) next to tmc_pc and try again.\n"
-                           "Supported names: baserom.gba, baserom_eu.gba, tmc.gba, tmc_eu.gba.");
+        Port_FatalRomError("缩小帽 PC 移植版 - 未找到 ROM",
+                           "无法加载 baserom.gba。\n\n"
+                           "请把 baserom.gba（美版）或 baserom_eu.gba（欧版）放到 tmc_pc 旁边后重试。\n"
+                           "支持的文件名：baserom.gba、baserom_eu.gba、tmc.gba、tmc_eu.gba。");
     }
 
     if (!gRomData || gRomSize == 0) {
-        Port_FatalRomError("Minish Cap PC Port - ROM load failed", "No ROM data available after loading.\n\n"
-                                                                   "The ROM file may be empty or unreadable.");
+        Port_FatalRomError("缩小帽 PC 移植版 - ROM 加载失败", "加载后没有可用的 ROM 数据。\n\n"
+                                                                   "ROM 文件可能为空或无法读取。");
     }
 #else
     /* #N64: gRomData/gRomSize already point at the embedded cart ROM (set by
@@ -1419,9 +1418,9 @@ void Port_LoadRom(const char* path) {
 
     if (gRomSize < R->expectedRomSize) {
         char msg[256];
-        snprintf(msg, sizeof(msg), "ROM file is truncated or invalid (size %u < expected %u).", gRomSize,
+        snprintf(msg, sizeof(msg), "ROM 文件被截断或无效（大小 %u < 预期 %u）。", gRomSize,
                  R->expectedRomSize);
-        Port_FatalRomError("Minish Cap PC Port - ROM invalid", msg);
+        Port_FatalRomError("缩小帽 PC 移植版 - ROM 无效", msg);
     }
     fprintf(stderr, "Using offsets for %s (game code: %.4s)\n",
             gRomRegion == ROM_REGION_EU   ? "EU"

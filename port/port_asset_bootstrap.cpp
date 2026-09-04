@@ -583,8 +583,10 @@ extern "C" void Port_EnsureAssetsReadyWithDisplay(SDL_Window* window, const u8* 
         return;
     }
 
-    const std::string message = err.empty() ? std::string("Asset extraction failed.") : err;
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Asset extraction failed", message.c_str(), window);
+    const std::string message = err.empty()
+                                    ? std::string("资源提取失败。\n\n请检查磁盘空间，以及 assets 目录的写入权限。")
+                                    : std::string("资源提取失败：\n\n") + err;
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "资源提取失败", message.c_str(), window);
 }
 
 extern "C" void Port_PaintBootSplash(SDL_Window* window, const char* message) {

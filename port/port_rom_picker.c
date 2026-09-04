@@ -443,8 +443,8 @@ int Port_RomPicker_PromptAndInstall(void) {
     fprintf(stderr, "[rom-picker] opening SDL file dialog...\n");
 
     SDL_DialogFileFilter filters[] = {
-        { "Game Boy Advance ROM", "gba" },
-        { "All files", "*" },
+        { "GBA 游戏 ROM", "gba" },
+        { "所有文件", "*" },
     };
 
     SDL_SetAtomicInt(&sPickStatus, PICK_PENDING);
@@ -479,8 +479,8 @@ int Port_RomPicker_PromptAndInstall(void) {
     void* romData = SDL_LoadFile(sPickPath, &romLen);
     if (!romData) {
         char msg[4608];
-        snprintf(msg, sizeof(msg), "Could not read the picked file:\n%s\n\n%s", sPickPath, SDL_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Read failed", msg, NULL);
+        snprintf(msg, sizeof(msg), "无法读取所选文件：\n%s\n\n%s", sPickPath, SDL_GetError());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "读取失败", msg, NULL);
         return -1;
     }
 
@@ -491,19 +491,19 @@ int Port_RomPicker_PromptAndInstall(void) {
         SDL_free(romData);
         char msg[5120];
         snprintf(msg, sizeof(msg),
-                 "That file's SHA-1 doesn't match any known TMC ROM:\n\n"
-                 "  Path:     %s\n"
-                 "  SHA-1:    %s\n\n"
-                 "Accepted hashes:\n"
-                 "  USA      b4bd50e4131b027c334547b4524e2dbbd4227130\n"
-                 "  EU       cff199b36ff173fb6faf152653d1bccf87c26fb7\n"
-                 "  JP       6c5404a1effb17f481f352181d0f1c61a2765c5d\n"
-                 "  USA Demo 63fcad218f9047b6a9edbb68c98bd0dec322d7a1\n"
-                 "  JP Demo  9cdb56fa79bba13158b81925c1f3641251326412\n\n"
-                 "If your dump matches one of these by hash but the picker\n"
-                 "still rejects it, something's mangling the bytes on disk.",
+                 "所选文件的 SHA-1 与任何已知《缩小帽》ROM 都不匹配：\n\n"
+                 "  路径：  %s\n"
+                 "  SHA-1： %s\n\n"
+                 "支持的 ROM 哈希：\n"
+                 "  USA       b4bd50e4131b027c334547b4524e2dbbd4227130\n"
+                 "  EU        cff199b36ff173fb6faf152653d1bccf87c26fb7\n"
+                 "  JP        6c5404a1effb17f481f352181d0f1c61a2765c5d\n"
+                 "  USA Demo  63fcad218f9047b6a9edbb68c98bd0dec322d7a1\n"
+                 "  JP Demo   9cdb56fa79bba13158b81925c1f3641251326412\n\n"
+                 "若你的 ROM 哈希在上面的列表之中但这里仍然拒绝，\n"
+                 "说明磁盘上的文件数据已被改动或损坏。",
                  sPickPath, hex);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wrong ROM", msg, NULL);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "无法识别的 ROM", msg, NULL);
         return -1;
     }
 
@@ -513,8 +513,8 @@ int Port_RomPicker_PromptAndInstall(void) {
     char dst[4096];
     if (ResolveInstallPath(dst, sizeof(dst)) != 0) {
         SDL_free(romData);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Install failed",
-                                 "Could not locate this executable's directory.", NULL);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "安装失败",
+                                 "无法定位本程序的目录。", NULL);
         return -1;
     }
 
@@ -522,8 +522,8 @@ int Port_RomPicker_PromptAndInstall(void) {
     SDL_free(romData);
     if (!wrote) {
         char msg[4608];
-        snprintf(msg, sizeof(msg), "Could not write %s:\n%s", dst, SDL_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Install failed", msg, NULL);
+        snprintf(msg, sizeof(msg), "无法写入 %s：\n%s", dst, SDL_GetError());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "安装失败", msg, NULL);
         return -1;
     }
 

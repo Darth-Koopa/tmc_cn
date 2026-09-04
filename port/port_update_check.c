@@ -290,21 +290,21 @@ static void ShowUpdateDialog(SDL_Window* window, const char* latestTag, const ch
     char message[512];
     snprintf(message,
              sizeof(message),
-             "A new version of TMC PC is available.\n\n"
-             "Installed version: %s\n"
-             "Latest version: %s\n\n"
-             "Open the GitHub release page?",
+             "《缩小帽》PC 移植版有新版本可用。\n\n"
+             "已安装版本：%s\n"
+             "最新版本：%s\n\n"
+             "是否打开 GitHub 发布页面？",
              TMC_PC_VERSION,
              latestTag);
 
     const SDL_MessageBoxButtonData buttons[] = {
-        { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Later" },
-        { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "View release" },
+        { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "稍后" },
+        { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "查看发布" },
     };
     const SDL_MessageBoxData data = {
         SDL_MESSAGEBOX_INFORMATION,
         window,
-        "Update available",
+        "发现新版本",
         message,
         (int)(sizeof(buttons) / sizeof(buttons[0])),
         buttons,

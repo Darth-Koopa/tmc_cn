@@ -218,14 +218,14 @@ void Port_RandoFileMenu_CommitAndStart(void) {
     seed = CurrentSeedValue();
     if (GenerateSeed(seed, settings)) {
         if (!Port_RandoSave_SaveActiveSlot(sMenu.save_slot)) {
-            SDL_snprintf(sMenu.status, sizeof(sMenu.status), "Generated seed, but sidecar save failed.");
+            SDL_snprintf(sMenu.status, sizeof(sMenu.status), "种子已生成，但旁车存档保存失败。");
             return;
         }
         sMenu.status[0] = '\0';
         sMenu.open = false;
         Port_FileSelectRando_StartSlot(sMenu.save_slot);
     } else {
-        SDL_snprintf(sMenu.status, sizeof(sMenu.status), "Seed failed logic verification; try another seed.");
+        SDL_snprintf(sMenu.status, sizeof(sMenu.status), "种子未通过逻辑验证；请换一个种子。");
     }
 }
 
