@@ -41,11 +41,6 @@ static inline int Port_IsValidHostPtr(const void* p) {
 // Load the ROM file and set up ROM-backed symbols
 void Port_LoadRom(const char* path);
 
-/* Number of font banks in the currently loaded ROM profile. Retail ROMs use 9;
- * the Angel Chinese JP-derived ROM uses 16. */
-int Port_GetFontBankCount(void);
-bool32 Port_IsAngelChineseRomActive(void);
-
 /*
  * Probe the same candidate locations Port_LoadRom would and return a
  * pointer to a static buffer holding the absolute path of the first

@@ -285,6 +285,9 @@ target("asset_extractor")
     add_files("port/port_asset_log.cpp")
     add_files("port/port_asset_pak.cpp")
     add_files("port/port_asset_index.c")
+    add_files("port/port_rom_hash.c")
+    add_files("port/port_rom_profile.c")
+    add_files("port/port_text_codec.c")
     add_includedirs("tools/src/assets_extractor")
     add_includedirs("include", "port", ".")
     add_packages("nlohmann_json", "fmt")
@@ -776,6 +779,9 @@ target("tmc_pc")
     add_files("port/port_icon.cpp")     -- SDL window icon (placeholder, ROM-extracted in future)
     add_files("port/port_mods.cpp")     -- Tier 1 mod loader: asset overrides from <exe>/mods/
     add_files("port/port_rom.c")        -- ROM loading & symbol resolution
+    add_files("port/port_rom_hash.c")   -- exact ROM identity hashes
+    add_files("port/port_rom_profile.c") -- retail/SP4 runtime profiles
+    add_files("port/port_text_codec.c") -- retail and Angel SP4 text codecs
         -- PC port stubs for undefined symbols
     add_files("port/port_stubs.c")
     add_files("port/stubs_autogen.c")
@@ -1069,6 +1075,28 @@ target("rng_golden_test")
     set_targetdir("build/pc")
     add_includedirs("port")
     add_files("port/port_rng_golden_test.c")
+target_end()
+
+-- ====================
+-- ROM profile + Angel SP4 text codec regression tests
+-- ====================
+target("rom_profile_test")
+    set_kind("binary")
+    set_languages("c11")
+    set_targetdir("build/pc")
+    add_includedirs(".", "port", "include")
+    add_files("port/port_rom_hash.c")
+    add_files("port/port_rom_profile.c")
+    add_files("port/port_rom_profile_test.c")
+target_end()
+
+target("text_codec_test")
+    set_kind("binary")
+    set_languages("c11")
+    set_targetdir("build/pc")
+    add_includedirs("port")
+    add_files("port/port_text_codec.c")
+    add_files("port/port_text_codec_test.c")
 target_end()
 
 

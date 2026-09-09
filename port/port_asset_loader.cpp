@@ -9,8 +9,8 @@ extern "C" {
 #include "common.h"
 #include "port_gba_mem.h"
 #include "port_rom.h"
-#include "port_config.h" /* gRomRegion / ROM_REGION_JP for the JP gfx-group gate */
-#include "region.h"      /* RegionAssetSubdir() — per-region cache folder */
+#include "port_config.h" /* gRomRegion / ROM_REGION_JP for region gates */
+#include "port_rom_profile.h"
 #include "port_asset_index.h"
 #include "structures.h"
 #include "area.h"
@@ -249,8 +249,8 @@ static std::vector<std::filesystem::path> AssetSearchRoots() {
  * folders) so they aren't forced to re-extract. The flat fallback is USA-only on
  * purpose: a JP/EU run must never silently pick up a flat USA tree — that is the
  * exact cross-region corruption this scheme exists to prevent. */
-static bool RegionAllowsLegacyFlat() {
-    return std::string(RegionAssetSubdir()) == "usa";
+static bool ProfileAllowsLegacyFlat() {
+    return std::string(Port_GetAssetCacheSubdir()) == "usa";
 }
 
 /* Shared search for an asset tree: probe <root>/<subdir>/<region> for
@@ -258,7 +258,7 @@ static bool RegionAllowsLegacyFlat() {
  * <root>/<subdir>. Editable trees live under "assets_src" and require
  * palettes.json too; runtime trees live under "assets". */
 std::optional<std::filesystem::path> FindAssetsRoot(const char* subdir, std::initializer_list<const char*> manifests) {
-    const char* sub = RegionAssetSubdir();
+    const char* sub = Port_GetAssetCacheSubdir();
     const auto hasManifests = [&](const std::filesystem::path& dir) {
         for (const char* m : manifests) {
             if (!std::filesystem::exists(dir / m)) {
@@ -268,11 +268,11 @@ std::optional<std::filesystem::path> FindAssetsRoot(const char* subdir, std::ini
         return true;
     };
     for (const auto& root : AssetSearchRoots()) {
-        const std::filesystem::path regioned = root / subdir / sub;
-        if (hasManifests(regioned)) {
-            return regioned;
+        const std::filesystem::path profiled = root / subdir / sub;
+        if (hasManifests(profiled)) {
+            return profiled;
         }
-        if (RegionAllowsLegacyFlat()) {
+        if (ProfileAllowsLegacyFlat()) {
             const std::filesystem::path legacy = root / subdir;
             if (hasManifests(legacy)) {
                 return legacy;
@@ -1089,7 +1089,8 @@ bool EnsureAssetGroupCache() {
     if (editableRoot.has_value()) {
         const std::filesystem::path runtimeRoot = RuntimeRootForEditableRoot(*editableRoot);
         std::string buildInfo;
-        if (!PortAssetPipeline::EnsureRuntimeAssetsBuilt(*editableRoot, runtimeRoot, &buildInfo)) {
+        if (!PortAssetPipeline::EnsureRuntimeAssetsBuilt(*editableRoot, runtimeRoot, &buildInfo,
+                                                         Port_GetTextCodec())) {
             std::fprintf(stderr, "[ASSET] Failed to build runtime assets from %s: %s\n", editableRoot->string().c_str(),
                          buildInfo.c_str());
             return false;
@@ -1215,7 +1216,7 @@ extern "C" void Port_DumpAssetEnvironment(FILE* out, const char* kind, unsigned 
                  : gRomRegion == ROM_REGION_JP  ? "JP"
                  : gRomRegion == ROM_REGION_USA ? "USA"
                                                 : "UNKNOWN",
-                 RegionAssetSubdir());
+                 Port_GetAssetCacheSubdir());
 
     std::error_code ec;
     const auto cwd = std::filesystem::current_path(ec);

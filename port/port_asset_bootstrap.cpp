@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "port_asset_bootstrap.h"
 #include "port_asset_pipeline.hpp"
+#include "port_rom_profile.h"
 #include "port_exe_path.hpp"
 
 #include <SDL3/SDL.h>
@@ -43,7 +44,6 @@
 #include "port_asset_loader.h"
 #include "port_asset_log.hpp"
 #include "port_asset_pipeline.hpp"
-#include "region.h" /* RegionAssetSubdir() — per-region cache folder */
 
 #include "assets_extractor_api.hpp"
 extern "C" const char* Port_GetLoadedRomPath(void);
@@ -96,7 +96,7 @@ void MountPaksForRoot(const std::filesystem::path& root) {
     }
     /* Per-region cache: assets/<region>/. Keeps USA/EU/JP paks from clobbering
      * each other when the same install runs more than one ROM. */
-    const std::filesystem::path assetsDir = root / "assets" / RegionAssetSubdir();
+    const std::filesystem::path assetsDir = root / "assets" / Port_GetAssetCacheSubdir();
     const int mounted = Port_MountAssetPaks(assetsDir.string().c_str());
     if (mounted > 0) {
         std::fprintf(stderr, "[ASSET] paks mounted: %d (%d entries)\n", mounted, Port_PakEntryCount());
@@ -508,9 +508,9 @@ extern "C" void Port_EnsureAssetsReadyWithDisplay(SDL_Window* window, const u8* 
      * was set by Port_LoadRom() before we got here, so RegionAssetSubdir() is valid.
      * Isolating per region stops a USA/EU/JP swap from reusing or overwriting another
      * region's extracted tree — the 16 MB size fingerprint alone can't tell them apart. */
-    const char* regionSub = RegionAssetSubdir();
-    const std::filesystem::path runtimeRoot = root / "assets" / regionSub;
-    const std::filesystem::path editableRoot = root / "assets_src" / regionSub;
+    const char* profileSub = Port_GetAssetCacheSubdir();
+    const std::filesystem::path runtimeRoot = root / "assets" / profileSub;
+    const std::filesystem::path editableRoot = root / "assets_src" / profileSub;
 
     /* Step 1: warm-launch fast path. Same ROM fingerprint + pack
      * mode recorded in assets/ means current runtime tree matches the

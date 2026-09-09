@@ -13,6 +13,7 @@
 #include "port_asset_loader.h"
 #include "port_config.h"
 #include "port_runtime_config.h"
+#include "port_rom_profile.h"
 #include "port_gba_mem.h"
 #include "structures.h"
 #include "tileMap.h"
@@ -418,55 +419,6 @@ int gActiveRegion = TMC_REGION_USA;
 #endif
 const RomOffsets* gRomOffsets = NULL;
 
-/* Active JP-derived ROM hack profile. Angel's Chinese patch keeps the retail
- * JP game code (BZMJ), but relocates the text/font pointer tables and adds
- * font banks 9..15. Keep the retail JP profile intact and make a shallow
- * runtime copy only when this ROM layout is detected. */
-static RomOffsets sRomOffsets_AngelChinese;
-static bool32 Port_IsAngelChineseRom(const u8* romData, u32 romSize);
-
-int Port_GetFontBankCount(void) {
-    if (gRomOffsets == &sRomOffsets_AngelChinese)
-        return TMC_FONT_BANK_COUNT;
-    /* Be robust against any later code that swaps gRomOffsets back to the
-     * retail JP profile: the ROM itself is authoritative for this hack. */
-    if (gRomData != NULL && Port_IsAngelChineseRom(gRomData, gRomSize))
-        return TMC_FONT_BANK_COUNT;
-    return TMC_RETAIL_FONT_BANK_COUNT;
-}
-
-bool32 Port_IsAngelChineseRomActive(void) {
-    return (gRomOffsets == &sRomOffsets_AngelChinese) ||
-           (gRomData != NULL && Port_IsAngelChineseRom(gRomData, gRomSize));
-}
-
-static bool32 Port_IsAngelChineseRom(const u8* romData, u32 romSize) {
-    if (romData == NULL || romSize < 0xE4F000u + 346u)
-        return FALSE;
-
-    /* Translation pointer relocated by the patch. */
-    if (Port_ReadU32(&romData[0x108ED8u]) != 0x08DCA000u)
-        return FALSE;
-
-    /* Replacement 16-entry font-bank table at ROM 0xDC9F00. */
-    if (Port_ReadU32(&romData[0xDC9F00u + 0x00u]) != 0x08692C00u ||
-        Port_ReadU32(&romData[0xDC9F00u + 0x10u]) != 0x08E00000u ||
-        Port_ReadU32(&romData[0xDC9F00u + 0x3Cu]) != 0x08E50000u)
-        return FALSE;
-
-    /* Replacement glyph mapping begins with the known JP/CN signature:
-     * FF FF, 1A 02, 10 02 ... at ROM 0xE4F000. */
-    if (romData[0xE4F000u + 0] != 0xFF ||
-        romData[0xE4F000u + 1] != 0xFF ||
-        romData[0xE4F000u + 2] != 0x1A ||
-        romData[0xE4F000u + 3] != 0x02 ||
-        romData[0xE4F000u + 4] != 0x10 ||
-        romData[0xE4F000u + 5] != 0x02)
-        return FALSE;
-
-    return TRUE;
-}
-
 /* USA offsets (from build/USA/tmc.map) */
 const RomOffsets kRomOffsets_USA = {
     .gfxAndPalettes = 0x5A2E80,
@@ -618,60 +570,56 @@ u32 Port_TownspersonSpriteLoadPtrsOffset(void) {
 }
 
 RomRegion Port_DetectRomRegion(const u8* romData, u32 romSize) {
-    if (!romData || romSize < 0xB0)
+    PortRomHashes hashes;
+    const PortRomProfile* profile;
+
+    gRomRegion = ROM_REGION_UNKNOWN;
+    gRomOffsets = NULL;
+    Port_SetActiveRomProfile(NULL);
+
+    if (!romData || romSize < 0xB0u) {
         return ROM_REGION_UNKNOWN;
-
-    if (memcmp(&romData[0xAC], "BZME", 4) == 0) {
-        gRomRegion = ROM_REGION_USA;
-        gRomOffsets = &kRomOffsets_USA;
-        fprintf(stderr, "ROM region detected: USA (BZME)\n");
-    } else if (memcmp(&romData[0xAC], "BZMP", 4) == 0) {
-        gRomRegion = ROM_REGION_EU;
-        gRomOffsets = &kRomOffsets_EU;
-        fprintf(stderr, "ROM region detected: EU (BZMP)\n");
-    } else if (memcmp(&romData[0xAC], "BZMJ", 4) == 0) {
-        gRomRegion = ROM_REGION_JP;
-        fprintf(stderr, "ROM region detected: JP (BZMJ)\n");
-#if defined(JP) || defined(MULTI_REGION)
-        /* JP binary (or fat multi-region binary): use JP offsets, but refuse to
-         * proceed if the table is still the unpopulated placeholder. */
-        if (kRomOffsets_JP.gfxAndPalettes == 0) {
-            Port_FatalRomError("缩小帽 PC 移植版 - 暂不支持日版",
-                               "这是日版（BZMJ）ROM，但本构建的日版数据表尚未填充。\n\n"
-                               "请暂时使用美版（BZME）或欧版（BZMP）ROM。\n"
-                               "日版支持状态参见 docs/JP_PORT_ENABLEMENT.md。");
-        }
-        gRomOffsets = &kRomOffsets_JP;
-
-        if (Port_IsAngelChineseRom(romData, romSize)) {
-            sRomOffsets_AngelChinese = kRomOffsets_JP;
-            sRomOffsets_AngelChinese.text09248 = 0xDC9F00u;
-            sRomOffsets_AngelChinese.text092D4 = 0xE4F000u;
-            gRomOffsets = &sRomOffsets_AngelChinese;
-        }
-#else
-        /* JP ROM fed to a single-region non-JP binary: code/data version
-         * mismatch. Keep USA offsets so the region cross-check in port_main.c
-         * reports the mismatch instead of crashing on the JP table. */
-        fprintf(stderr, "WARNING: JP ROM in a non-JP binary — rebuild with --game_version=JP.\n");
-        gRomOffsets = &kRomOffsets_USA;
-#endif
-    } else {
-        fprintf(stderr, "WARNING: Unknown ROM game code '%.4s'. Defaulting to USA offsets.\n", &romData[0xAC]);
-        gRomRegion = ROM_REGION_USA;
-        gRomOffsets = &kRomOffsets_USA;
     }
+
+    profile = Port_IdentifyRomBuffer(romData, romSize, &hashes);
+    Port_SetActiveRomProfile(profile);
+
+    if (profile == NULL) {
+        char message[512];
+        fprintf(stderr, "ROM profile is not recognized (SHA-1: %s, SHA-256: %s).\n", hashes.sha1, hashes.sha256);
+        snprintf(message, sizeof(message),
+                 "ROM 版本不受支持。\n\n"
+                 "请使用已验证的美版、欧版、日版原版，或天使汉化组 SP4 日版 ROM。\n\n"
+                 "只有与项目内置 SHA-1/SHA-256 完全匹配的 ROM 才会继续运行。\n\n"
+                 "游戏代码：%.4s\nSHA-1：%s\nSHA-256：%s",
+                 &romData[0xAC], hashes.sha1, hashes.sha256);
+        Port_FatalRomError("缩小帽 PC 移植版 - 不支持的 ROM", message);
+        return ROM_REGION_UNKNOWN;
+    }
+
+    gRomRegion = (RomRegion)profile->region;
+    switch (gRomRegion) {
+        case ROM_REGION_USA: gRomOffsets = &kRomOffsets_USA; break;
+        case ROM_REGION_EU:  gRomOffsets = &kRomOffsets_EU;  break;
+        case ROM_REGION_JP:  gRomOffsets = &kRomOffsets_JP;  break;
+        default: break;
+    }
+
+    if (gRomOffsets == NULL) {
+        Port_FatalRomError("缩小帽 PC 移植版 - ROM 配置错误", "已识别 ROM，但没有对应的区域偏移表。");
+        return ROM_REGION_UNKNOWN;
+    }
+
 #if defined(PC_PORT) && defined(MULTI_REGION)
-    /* Fat binary: publish the detected region to the runtime REGION_IS_* macros
-     * so the converted gameplay-behavior branches follow the loaded ROM. */
-    gActiveRegion = (gRomRegion == ROM_REGION_EU)   ? TMC_REGION_EU
-                    : (gRomRegion == ROM_REGION_JP) ? TMC_REGION_JP
-                                                    : TMC_REGION_USA;
+    gActiveRegion = (gRomRegion == ROM_REGION_EU) ? TMC_REGION_EU
+                    : (gRomRegion == ROM_REGION_JP) ? TMC_REGION_JP : TMC_REGION_USA;
     fprintf(stderr, "Active region set to %s (multi-region binary).\n",
-            gActiveRegion == TMC_REGION_EU   ? "EU"
-            : gActiveRegion == TMC_REGION_JP ? "JP"
-                                             : "USA");
+            gActiveRegion == TMC_REGION_EU ? "EU" : gActiveRegion == TMC_REGION_JP ? "JP" : "USA");
 #endif
+
+    fprintf(stderr, "ROM profile detected: %s (%s), codec=%d, glyphBanks=%u, wideBank=%u, specialBank=%u\n",
+            profile->displayName, profile->id, (int)profile->textCodec, profile->glyphBankCount,
+            profile->wideGlyphFirstBank, profile->specialPaletteBank);
     return gRomRegion;
 }
 
@@ -1592,7 +1540,14 @@ void Port_LoadRom(const char* path) {
     /* Font/text data tables — from active ROM */
     memcpy(gUnk_08109244, &gRomData[R->text09244], 4);
     memcpy(gUnk_0810926C, &gRomData[R->text0926C], 64);
-    memcpy(gUnk_081092D4, &gRomData[R->text092D4], 346);
+    {
+        const u32 remapOffset = Port_GetTextRemapOffset(R->text092D4);
+        const u32 remapSize = Port_GetTextRemapSize();
+        memset(gUnk_081092D4, 0, 346);
+        if (remapOffset < gRomSize && remapSize <= gRomSize - remapOffset && remapSize <= 346) {
+            memcpy(gUnk_081092D4, &gRomData[remapOffset], remapSize);
+        }
+    }
     memcpy(gUnk_0810942E, &gRomData[R->text0942E], 160);
     memcpy(gUnk_081094CE, &gRomData[R->text094CE], 1378);
 
@@ -1641,18 +1596,17 @@ void Port_LoadRom(const char* path) {
     }
 #endif
 
-    /* gUnk_08109248 — resolved from the active ROM.
-     * Retail ROMs have 9 entries here. The Angel Chinese patch replaces this
-     * table with 16 entries, so only that profile reads entries 9..15. */
-    const int fontBankCount = Port_GetFontBankCount();
-    for (int i = 0; i < TMC_FONT_BANK_COUNT; i++) {
-        gUnk_08109248[i] = NULL;
+    /* gUnk_08109248 — resolved from the active ROM profile. */
+    {
+        const u32 glyphTableOffset = Port_GetGlyphTableOffset(R->text09248);
+        const u32 glyphBankCount = Port_GetGlyphBankCount();
+        memset(gUnk_08109248, 0, sizeof(gUnk_08109248));
+        for (u32 i = 0; i < glyphBankCount && i < TMC_FONT_BANK_COUNT; i++) {
+            gUnk_08109248[i] = Port_UnpackRomDataPtr(&gRomData[glyphTableOffset], i);
+        }
+        fprintf(stderr, "gUnk_08109248 font tables loaded (%u entries from profile table 0x%X).\n",
+                glyphBankCount, glyphTableOffset);
     }
-    for (int i = 0; i < fontBankCount; i++) {
-        gUnk_08109248[i] = Port_UnpackRomDataPtr(&gRomData[R->text09248], i);
-    }
-    fprintf(stderr, "gUnk_08109248 font tables loaded (%d entries from active ROM).\n",
-            fontBankCount);
 
     /* gUnk_081092AC — resolved from active ROM */
     for (int i = 0; i < 10; i++) {
@@ -1883,17 +1837,6 @@ void Port_ApplyLanguage(void) {
     static int sLastAppliedPref = -2; /* -2 = never applied */
     if (!gSaveHeader)
         return;
-
-    /* Angel's Chinese ROM is a JP-based ROM hack. On real hardware it uses
-     * language == 0, which is significant because sub_0805F9A0() enables the
-     * ROM's Chinese character-to-glyph mapping only for LANGUAGE_JP. The PC
-     * port may otherwise retain an English save/config language even though
-     * the ROM text itself correctly falls back to the JP/ROM translation. */
-    if (Port_IsAngelChineseRomActive()) {
-        sLastAppliedPref = -1;
-        gSaveHeader->language = 0; /* LANGUAGE_JP */
-        return;
-    }
 
     int lang = Port_Config_PreferredLanguage();
     if (lang == sLastAppliedPref && lang >= 0)

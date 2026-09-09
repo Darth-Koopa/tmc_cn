@@ -1,0 +1,63 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "port_rom_hash.h"
+#include "port_text_codec.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    PORT_ROM_VARIANT_UNKNOWN = 0,
+    PORT_ROM_VARIANT_USA_RETAIL,
+    PORT_ROM_VARIANT_EU_RETAIL,
+    PORT_ROM_VARIANT_JP_RETAIL,
+    PORT_ROM_VARIANT_JP_ANGEL_SP4,
+    PORT_ROM_VARIANT_USA_DEMO,
+    PORT_ROM_VARIANT_JP_DEMO,
+} PortRomVariant;
+
+typedef struct {
+    PortRomVariant variant;
+    int region; /* RomRegion, kept as int to avoid a port_config.h dependency. */
+    const char* id;
+    const char* displayName;
+    const char* gameCode;
+    const char* sha1;
+    const char* sha256;
+    size_t expectedSize;
+    int playable;
+    PortTextCodec textCodec;
+    uint32_t glyphTableOffset;
+    uint32_t textRemapOffset;
+    uint32_t textRemapSize;
+    uint32_t glyphBankCount;
+    uint32_t wideGlyphFirstBank;
+    uint32_t specialPaletteBank;
+    const char* saveFilename;
+} PortRomProfile;
+
+const PortRomProfile* Port_IdentifyRomHashes(const PortRomHashes* hashes, const char gameCode[4]);
+const PortRomProfile* Port_IdentifyRomBuffer(const void* data, size_t size, PortRomHashes* hashesOut);
+const PortRomProfile* Port_IdentifyRomFile(const char* path, PortRomHashes* hashesOut);
+int Port_RomProfileIsPlayable(const PortRomProfile* profile);
+
+void Port_SetActiveRomProfile(const PortRomProfile* profile);
+const PortRomProfile* Port_GetActiveRomProfile(void);
+PortRomVariant Port_GetRomVariant(void);
+PortTextCodec Port_GetTextCodec(void);
+uint32_t Port_GetGlyphBankCount(void);
+uint32_t Port_GetWideGlyphFirstBank(void);
+uint32_t Port_GetSpecialPaletteBank(void);
+uint32_t Port_GetGlyphTableOffset(uint32_t regionOffset);
+uint32_t Port_GetTextRemapOffset(uint32_t regionOffset);
+uint32_t Port_GetTextRemapSize(void);
+const char* Port_GetVariantSaveFilename(void);
+const char* Port_GetAssetCacheSubdir(void);
+
+#ifdef __cplusplus
+}
+#endif

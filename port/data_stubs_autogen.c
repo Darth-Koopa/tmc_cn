@@ -5,6 +5,7 @@
 #include "gba/m4a.h"
 #include "room.h"
 #include "port_config.h"
+#include "port_rom_profile.h"
 
 /*
  * Data stubs: temporary placeholders for assets (SFX/MUS/ROM tables).
@@ -69,7 +70,7 @@ u8 gUnk_080C9044[8] = { 0 };
 /* Font/text data â€” loaded from ROM by Port_LoadRom */
 void* gTextVariableSources[5];
 u8 gUnk_08109244[4] __attribute__((aligned(4)));
-void* gUnk_08109248[TMC_FONT_BANK_COUNT];
+void* gUnk_08109248[PORT_MAX_GLYPH_BANKS];
 u8 gUnk_0810926C[64] __attribute__((aligned(4)));
 void* gUnk_081092AC[10];
 u8 gUnk_081092D4[346] __attribute__((aligned(4)));

@@ -39,6 +39,7 @@
  */
 
 #include "port_types.h"
+#include "port_rom_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -175,7 +176,9 @@ static void ResolveRegionDefaultPath(void) {
     if (sExplicitProfile) {
         return;
     }
-    if (REGION_IS_EU) {
+    if (Port_GetVariantSaveFilename() != NULL) {
+        name = Port_GetVariantSaveFilename();
+    } else if (REGION_IS_EU) {
         name = "tmc_eu.sav";
     } else if (REGION_IS_JP) {
         name = "tmc_jp.sav";
@@ -189,6 +192,10 @@ static void ResolveRegionDefaultPath(void) {
 static void LoadEepromFile(void) {
 #ifdef MULTI_REGION
     ResolveRegionDefaultPath();
+#else
+    if (!sExplicitProfile && Port_GetVariantSaveFilename() != NULL) {
+        snprintf(sActivePath, sizeof(sActivePath), "%s", Port_GetVariantSaveFilename());
+    }
 #endif
     FILE* f = fopen(sActivePath, "rb");
     if (!f) {

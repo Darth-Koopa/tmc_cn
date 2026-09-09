@@ -9,8 +9,10 @@
 #include "ui.h"
 #ifdef PC_PORT
 #include <stdio.h>
-#include "../port/port_rom.h"
 #include "../port/port_tts.h"
+#ifdef PC_PORT
+#include "../port/port_rom_profile.h"
+#endif
 #endif
 
 #define MESSAGE_ADVANCE_KEYS (A_BUTTON | B_BUTTON | DPAD_ANY | R_BUTTON)
@@ -692,12 +694,7 @@ u16 RunTextCommand(TextRender* this) {
     }
     this->curToken.extended = 0;
 #ifdef PC_PORT
-    /* Angel SP4 keeps the button/special glyphs in bank 3.  Do not make the
-     * whole bank 3 a special-palette bank: most of that bank is ordinary
-     * text.  Only the first eight glyphs are the controller symbols. */
-    const bool32 angelButtonGlyph =
-        Port_IsAngelChineseRomActive() && ((chr >> 8) & 0xFu) == 3 && (chr & 0xFFu) <= 7;
-    if (chr >> 8 == 7 || angelButtonGlyph) {
+    if (((chr >> 8) & 0xFu) == Port_GetSpecialPaletteBank()) {
 #else
     if (chr >> 8 == 7) {
 #endif
