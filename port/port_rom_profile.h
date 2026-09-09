@@ -10,6 +10,10 @@
 extern "C" {
 #endif
 
+#ifndef PORT_MAX_GLYPH_BANKS
+#define PORT_MAX_GLYPH_BANKS 16
+#endif
+
 typedef enum {
     PORT_ROM_VARIANT_UNKNOWN = 0,
     PORT_ROM_VARIANT_USA_RETAIL,

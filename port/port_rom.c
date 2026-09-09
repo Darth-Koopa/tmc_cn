@@ -819,7 +819,7 @@ void Port_RefreshAreaData(u32 area) {
 extern void* gTextVariableSources[];
 extern u8 gUnk_08109244[];
 extern u32* gTranslations[];
-extern void* gUnk_08109248[];
+extern void* gUnk_08109248[PORT_MAX_GLYPH_BANKS];
 extern u8 gUnk_0810926C[];
 extern void* gUnk_081092AC[];
 extern u8 gUnk_081092D4[];
@@ -1600,7 +1600,7 @@ void Port_LoadRom(const char* path) {
     {
         const u32 glyphTableOffset = Port_GetGlyphTableOffset(R->text09248);
         const u32 glyphBankCount = Port_GetGlyphBankCount();
-        memset(gUnk_08109248, 0, sizeof(gUnk_08109248));
+        memset(gUnk_08109248, 0, sizeof(void*) * PORT_MAX_GLYPH_BANKS);
         for (u32 i = 0; i < glyphBankCount && i < TMC_FONT_BANK_COUNT; i++) {
             gUnk_08109248[i] = Port_UnpackRomDataPtr(&gRomData[glyphTableOffset], i);
         }
