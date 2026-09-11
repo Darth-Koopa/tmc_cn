@@ -98,7 +98,7 @@ sudo pacman -S xmake sdl3 libpng fmt nlohmann-json git curl
 
 **Linux (Ubuntu / Debian):**
 ```sh
-sudo apt install xmake libsdl3-dev libpng-dev libfmt-dev nlohmann-json3-dev git curl
+sudo apt install xmake libsdl3-dev libpng-dev libfmt-dev nlohmann-json3-dev libcurl4-openssl-dev git curl
 ```
 
 **macOS (Apple Silicon or Intel):**
@@ -151,7 +151,8 @@ single-target invocation, and other build options.
 
 | Action                         | Keyboard         | Gamepad        |
 |--------------------------------|------------------|----------------|
-| Fast-forward (hold)            | Tab              | Right trigger  |
+| Fast-forward (hold)            | Tab              | —              |
+| Soft reset to title            | A+B+Start+Select | A+B+Start+Select |
 | Toggle fullscreen              | F11 / Alt+Enter  | —              |
 | Cycle upscaler                 | F12              | —              |
 | Toggle text-to-speech          | F7               | —              |
