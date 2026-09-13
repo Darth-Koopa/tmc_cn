@@ -1,5 +1,77 @@
 # Changelog
 
+## Unreleased
+
+- Sitting NPC dialogue updates the intended script condition without
+  overwriting wait-state fields on 64-bit PC builds.
+
+- Green ChuChus in Minish Woods emerge and attack again: enemy activation
+  bounds now read the correct PC entity fields instead of the enemy ID/type.
+
+- Festival doors and other room-managed objects spawn throughout the active
+  widescreen viewport in USA, EU, and JP.
+- Minish path foliage keeps the correct tilemap pages while scrolling and
+  after room re-entry.
+- Minish Woods fog and light rays continue across the full widescreen view.
+- Rolling room transitions temporarily use the native viewport, restoring
+  the wide camera and refreshing the tilemap on completion.
+
+## v0.9.3 (2026-09-12)
+
+Widescreen rendering and stability fixes, plus additional regional gameplay
+corrections. Includes all fixes shipped in 0.9.1 and 0.9.2.
+
+### Widescreen
+
+- Sprites and backdrop colors remain visible across the original 240-pixel
+  boundary, including transparent backgrounds and window effects.
+- Negative screen shake no longer opens a seam at the widescreen boundary.
+- Digging-cave iris transitions temporarily use the native viewport, then
+  restore the wider camera and tilemap together when the effect finishes.
+- Dampe's scripted visibility checks respect the active viewport width.
+- Dialogue centering follows the frame actually drawn, including moving,
+  opening and closing windows.
+- Console-Parity mode explains why widescreen is unavailable instead of
+  reporting that it was enabled.
+
+### Stability
+
+- Audio scratch buffers survive shutdown until the audio thread has stopped.
+- Malformed sprite assets and out-of-range numeric configuration values are
+  rejected without unsafe reads or conversions.
+- Graphics allocation safely handles full and fragmented slots; NPC dialogue
+  tolerates unavailable graphics instead of dereferencing a missing allocation.
+
+### Regional gameplay and widescreen fixes (#191, #193)
+
+- EU and JP ROMs now use their own collision-matrix addresses for enemy
+  contact and damage, including the cached settings used by collision handlers.
+- Japanese sound effects retain their ROM offset when `sounds.json` updates
+  only the EU offset.
+- Location-name banners stay together and centered in widescreen instead of
+  having their final glyphs moved to the HUD's right edge.
+- The Deepwood Shrine barrel hole again requires the original rotation angle
+  before Link can fall through it.
+
+### Regional gameplay audit fixes
+
+- EU cannonballs, Vaati attacks/eyes, and HUD graphics use native sprite
+  indices, including the HUD frame/tile tables.
+- Additional room entity lists and moving lily-pad rails load from verified
+  USA, EU, and JP addresses. Copied lists retain native script addresses.
+- EU tile collision shapes, tile properties, and wall-fusion records use
+  the active ROM's tables instead of compiled USA pointers. Invalid saved
+  fusion cursors are rejected before reading beyond the offer list.
+- Large chests remain available when reward allocation fails and commit
+  collection only after the item grant. Enemy death effects tolerate a full
+  entity pool.
+
+### Verification
+
+- Added focused widescreen rendering, camera, dialogue and NPC regressions.
+- GPU parity builds now include widescreen scenes at the configured width,
+  with independent expected-pixel checks for the compositor regression.
+
 ## v0.9.2 (2026-09-11)
 
 Follow-up to v0.9.1's region work, driven by testing the Picori Festival on

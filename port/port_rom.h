@@ -85,6 +85,12 @@ void Port_PrintRomAccessSummary(void);
  * resolves ROM data pointers to native, and returns NULL for GBA Thumb function
  * pointers (bit 0 set) which can't be called on PC.
  */
+const u16* Port_GetCollisionShapeData(u32 index);
+u16 Port_GetTileTypeProperty(u32 tileType);
+void* Port_GetFuserFusionData(u32 fuserId);
+void* Port_GetLilypadRail(u32 index);
+u64 Port_GetEntityFuserData(u32 kind, u8 id, u8 type, u8 type2);
+
 void* Port_ReadPackedRomPtr(const void* base, u32 index);
 
 /* ---- Active-ROM table accessors (region-selected via gRomOffsets) ----
@@ -96,10 +102,7 @@ u32 Port_FixedTypeGfxCountForRegion(void); /* 526 USA/JP, 525 EU */
 /* Entry `index` of a packed u32 GBA-pointer table at ROM offset `romOffset`,
  * resolved into gRomData. Does NOT clear bit 0 (fuser records may be odd). */
 const u8* Port_ReadActiveRomPtrTable(u32 romOffset, u32 index);
-const u8* Port_GetCollisionShapeData(u32 index); /* 16-row u16 mask, shape 0..39 */
-u32 Port_GetTileTypeProperty(u32 tileType);      /* u16 from gUnk_08000360 */
 const u16* Port_GetFusionTextData(u32 fuserId);  /* gUnk_08001A7C[fuserId] */
-const u8* Port_GetFuserFusionData(u32 fuserId);  /* gUnk_08001DCC[fuserId] */
 u64 Port_FindEntityFuserData(u32 isNpc, u8 id, u8 type, u8 type2); /* textId << 32 | fuserId, 0 = none */
 
 /**
@@ -140,12 +143,14 @@ static inline void* Port_ResolveScript(u32 gba_addr) {
  * of the loaded ROM — spritePtr is already region-native and translating it
  * MIS-translates whenever a native EU/JP address collides with a different
  * script's USA key (30 EU / 5 JP known collisions). Discriminate by where the
- * EntityData record itself lives.
+ * EntityData record itself lives, including registered copies of ROM lists.
  */
+int Port_IsCopiedRomEntityData(const void* entityData);
+
 static inline void* Port_ResolveEntityScript(const void* entityData, u32 spritePtr) {
     uintptr_t p = (uintptr_t)entityData;
     uintptr_t base = (uintptr_t)gRomData;
-    if (gRomData && p >= base && p < base + gRomSize)
+    if ((gRomData && p >= base && p - base < gRomSize) || Port_IsCopiedRomEntityData(entityData))
         return Port_ResolveRomData(spritePtr); /* ROM-native: no translation */
     return Port_ResolveScript(spritePtr);      /* compiled blob: USA-baseline */
 }

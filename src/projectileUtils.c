@@ -5,7 +5,7 @@
 #include "color.h"
 #include "projectile.h"
 #ifdef PC_PORT
-#include "port_rom.h"
+#include "port_sprite_region.h"
 #endif
 
 extern const ProjectileDefinition gProjectileDefinitions[];
@@ -59,18 +59,13 @@ bool32 ProjectileInit(Entity* this) {
         }
         this->spriteIndex = definition->spriteIndex;
 #ifdef PC_PORT
-        /* These ids take spriteIndex from a USA Sprites enum name >= 289 (EU-native
-         * numeric entries 20/25/34 already come from *_eu twins). */
-        switch (this->id) {
-            case ARROW_PROJECTILE:
-            case V1_DARK_MAGIC_PROJECTILE:
-            case CANNONBALL_PROJECTILE:
-            case V1_EYE_LASER:
-            case SPIKED_ROLLERS:
-            case V2_PROJECTILE:
-            case GYORG_MALE_ENERGY_PROJECTILE:
-                this->spriteIndex = Port_RemapSpriteIndex(this->spriteIndex);
-                break;
+        /* These shared definitions use the compiled Sprites enum. The EU
+         * override tables for other projectiles already hold native IDs. */
+        if (this->id == CANNONBALL_PROJECTILE || this->id == ARROW_PROJECTILE ||
+            this->id == V1_DARK_MAGIC_PROJECTILE || this->id == V1_EYE_LASER ||
+            this->id == SPIKED_ROLLERS || this->id == V2_PROJECTILE ||
+            this->id == GYORG_MALE_ENERGY_PROJECTILE) {
+            this->spriteIndex = Port_CompiledSpriteIndex(this->spriteIndex);
         }
 #endif
         if (this->spriteSettings.draw == 0) {

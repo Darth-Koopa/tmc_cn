@@ -9,9 +9,11 @@
 
 #include "port_rom.h"
 #include "area.h"
+#include "entity.h"
 #include "map.h"
 #include "port_asset_loader.h"
 #include "port_config.h"
+#include "port_sprite_region.h"
 #include "port_runtime_config.h"
 #include "port_rom_profile.h"
 #include "port_gba_mem.h"
@@ -642,11 +644,69 @@ u32 Port_TownspersonSpriteLoadPtrsOffset(void) {
     return gRomOffsets ? gRomOffsets->townspersonSpriteLoadPtrs : 0x10B6ECu;
 }
 
+/* Read packed data pointers without stripping bit zero: fusion records may
+ * be byte-aligned. Check both the table entry and the complete target span. */
+static void* ResolveActiveDataPointer(u32 table, u32 index, u32 bytes) {
+    u32 address;
+    if (!gRomData || table == 0 || table > gRomSize ||
+        index >= (gRomSize - table) / 4) return NULL;
+    memcpy(&address, gRomData + table + index * 4, 4);
+    if (address < 0x08000000u) return NULL;
+    u32 offset = address - 0x08000000u;
+    if (offset > gRomSize || bytes > gRomSize - offset) return NULL;
+    return gRomData + offset;
+}
+
+const u16* Port_GetCollisionShapeData(u32 index) {
+    if (!gRomOffsets || index >= 40) return NULL;
+    const u16* shape = ResolveActiveDataPointer(gRomOffsets->collisionShapePtrs, index, 32);
+    return ((uintptr_t)shape & 1) ? NULL : shape;
+}
+
+u16 Port_GetTileTypeProperty(u32 tileType) {
+    if (!gRomOffsets || !gRomData || tileType >= 0xAE4 / 2) return 0;
+    u32 base = gRomOffsets->tileTypeProperties;
+    if (base == 0 || base > gRomSize || (tileType + 1) * 2 > gRomSize - base) return 0;
+    const u8* value = gRomData + base + tileType * 2;
+    return value[0] | ((u16)value[1] << 8);
+}
+
+void* Port_GetFuserFusionData(u32 fuserId) {
+    if (!gRomOffsets || fuserId >= 120) return NULL;
+    return ResolveActiveDataPointer(gRomOffsets->fuserFusionPtrs, fuserId, 12);
+}
+
+void* Port_GetLilypadRail(u32 index) {
+    if (!gRomOffsets || index >= 3) return NULL;
+    return ResolveActiveDataPointer(gRomOffsets->lilypadRails, index, 4);
+}
+
+u64 Port_GetEntityFuserData(u32 kind, u8 id, u8 type, u8 type2) {
+    static const u32 masks[] = { 0xFFFFFF, 0xFFFF00, 0xFF00FF, 0xFF0000 };
+    if (!gRomOffsets || !gRomData) return 0;
+    u32 table = kind == ENEMY ? gRomOffsets->fuserEnemyData :
+                kind == NPC ? gRomOffsets->fuserNpcData : 0;
+    if (!table || table > gRomSize) return 0;
+    u32 key = ((u32)id << 16) | ((u32)type << 8) | type2;
+    /* Retail scans skip the leading six-byte sentinel record. */
+    for (u32 i = 1; i < 128 && (i + 1) * 6 <= gRomSize - table; i++) {
+        const u8* entry = gRomData + table + i * 6;
+        if (!entry[0]) break;
+        u32 entryKey = ((u32)entry[0] << 16) | ((u32)entry[1] << 8) | entry[2];
+        u32 mask = masks[(entry[1] == 0xFF ? 2 : 0) | (entry[2] == 0xFF ? 1 : 0)];
+        if ((key & mask) == (entryKey & mask)) {
+            if (entry[3] >= 120) return 0;
+            return ((u64)(entry[4] | ((u16)entry[5] << 8)) << 32) | entry[3];
+        }
+    }
+    return 0;
+}
+
 /* ---- Active-ROM table accessors ----
  * Every reader bounds-checks against gRomSize and fails closed (NULL / 0)
  * when the active region has no offset (RomOffsets field == 0). */
 static const u8* RomBytes(u32 table, u32 rel, u32 len) {
-    if (table == 0 || table > gRomSize || rel > gRomSize - table || len > gRomSize - table - rel)
+    if (!gRomData || table == 0 || table > gRomSize || rel > gRomSize - table || len > gRomSize - table - rel)
         return NULL;
     return &gRomData[table + rel];
 }
@@ -681,56 +741,15 @@ const u8* Port_ReadActiveRomPtrTable(u32 romOffset, u32 index) {
     return (gba >= 0x08000000u && gba - 0x08000000u < gRomSize) ? &gRomData[gba - 0x08000000u] : NULL;
 }
 
-const u8* Port_GetCollisionShapeData(u32 index) {
-    if (gRomOffsets == NULL || index >= 40u)
-        return NULL;
-    return Port_ReadActiveRomPtrTable(gRomOffsets->collisionShapePtrs, index);
-}
-
-u32 Port_GetTileTypeProperty(u32 tileType) {
-    const u8* p = (gRomOffsets && tileType < 0x4000u) ? RomBytes(gRomOffsets->tileTypeProperties, tileType * 2u, 2u)
-                                                       : NULL;
-    return p ? Port_ReadU16(p) : 0u;
-}
-
 const u16* Port_GetFusionTextData(u32 fuserId) {
     if (gRomOffsets == NULL || fuserId >= FUSER_TABLE_COUNT)
         return NULL;
     return (const u16*)Port_ReadActiveRomPtrTable(gRomOffsets->fusionTextPtrs, fuserId);
 }
 
-const u8* Port_GetFuserFusionData(u32 fuserId) {
-    if (gRomOffsets == NULL || fuserId >= FUSER_TABLE_COUNT)
-        return NULL;
-    return Port_ReadActiveRomPtrTable(gRomOffsets->fuserFusionPtrs, fuserId);
-}
-
-/* GetFuserData's 6-byte {id, type, type2, fuserId, textId(u16)} key scan over
- * the active ROM's enemy/NPC table. Packed result: textId << 32 | fuserId. */
+/* Both entry points share the same bounded retail record scanner. */
 u64 Port_FindEntityFuserData(u32 isNpc, u8 id, u8 type, u8 type2) {
-    static const u32 masks[4] = { 0x00FFFFFFu, 0x00FFFF00u, 0x00FF00FFu, 0x00FF0000u };
-    const u32 key = ((u32)id << 16) | ((u32)type << 8) | type2;
-    const u8* table;
-    u32 record;
-    if (gRomOffsets == NULL)
-        return 0;
-    table = RomBytes(isNpc ? gRomOffsets->fuserNpcData : gRomOffsets->fuserEnemyData, 0u, 6u * 129u);
-    if (table == NULL)
-        return 0;
-    /* Record 0 is a sentinel; retail tables terminate well inside 128 records. */
-    for (record = 1; record <= 128u; record++) {
-        const u8* e = table + record * 6u;
-        u32 entryKey = ((u32)e[0] << 16) | ((u32)e[1] << 8) | e[2];
-        u32 mask = masks[((e[1] == 0xFF) ? 2u : 0u) | ((e[2] == 0xFF) ? 1u : 0u)];
-        if (e[0] == 0)
-            return 0;
-        if ((key & mask) != (entryKey & mask))
-            continue;
-        if (e[3] >= FUSER_TABLE_COUNT)
-            return 0;
-        return ((u64)((u32)e[4] | ((u32)e[5] << 8)) << 32) | e[3];
-    }
-    return 0;
+    return Port_GetEntityFuserData(isNpc ? NPC : ENEMY, id, type, type2);
 }
 
 RomRegion Port_DetectRomRegion(const u8* romData, u32 romSize) {
@@ -1499,17 +1518,10 @@ void Port_LoadRom(const char* path) {
         fprintf(stderr, "gPalette_549 loaded (%zu bytes from gGlobalGfxAndPalettes + 0x44A0).\n", sizeof(gPalette_549));
     }
 
-    /* gLilypadRails — 3-entry packed pointer table (rail command lists for
-     * type2>=0x80 lilypads and kinstone-fused lilypad rails). The port stub
-     * (port_linked_stubs.c) is a zero-init native array, so without this the
-     * rails resolve to NULL and those lilypads never move along their path. */
+    /* Resolve native rail pointers for every supported ROM, including JP. */
     {
         extern void* gLilypadRails[];
-        int i;
-        for (i = 0; i < 3; i++) {
-            gLilypadRails[i] = (void*)Port_ReadActiveRomPtrTable(R->lilypadRails, (u32)i);
-        }
-        fprintf(stderr, "gLilypadRails loaded (3 rail pointers from ROM 0x%X).\n", R->lilypadRails);
+        for (u32 i = 0; i < 3; i++) gLilypadRails[i] = Port_GetLilypadRail(i);
     }
 
     /* Runtime-rendered sprite data must come from the active ROM.
@@ -1587,9 +1599,9 @@ void Port_LoadRom(const char* path) {
         memset(gMoreSpritePtrs, 0, sizeof(gMoreSpritePtrs));
         memset(gSpriteAnimations_322, 0, sizeof(gSpriteAnimations_322));
 
-        const u32 sp322Index = Port_RemapSpriteIndex(322u); /* EU-native 321 */
-        if (R->spritePtrsCount > sp322Index) {
-            const SpritePtr* sp322 = &gSpritePtrs[sp322Index];
+        const u16 itemSpriteIndex = Port_LogicalSpriteIndex(322);
+        if (R->spritePtrsCount > itemSpriteIndex) {
+            const SpritePtr* sp322 = &gSpritePtrs[itemSpriteIndex];
             gMoreSpritePtrs[0] = (u16*)sp322->animations;
             gMoreSpritePtrs[1] = (u16*)sp322->frames;
             gMoreSpritePtrs[2] = (u16*)sp322->ptr;
@@ -1610,7 +1622,7 @@ void Port_LoadRom(const char* path) {
                     resolvedCount++;
                 }
                 fprintf(stderr, "gSpriteAnimations_322 resolved (%u entries via SpritePtr[%u]).\n", resolvedCount,
-                        sp322Index);
+                        (unsigned)itemSpriteIndex);
             }
         }
     }

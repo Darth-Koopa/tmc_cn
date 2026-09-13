@@ -51,6 +51,13 @@ typedef struct {
     u32 uiData;           /* UI misc data */
     u32 fadeData;         /* brightness/fade tables */
     u32 overlaySizeTable; /* OBJ size/clipping table */
+    u32 collisionMatrix;  /* gCollisionMtx, including adjacent settings read by the engine */
+    u32 collisionShapePtrs; /* 40 packed pointers to 16-row pixel masks */
+    u32 tileTypeProperties; /* u16 traversal/layer flags */
+    u32 fuserFusionPtrs; /* 120 packed pointers to fusion records */
+    u32 fuserEnemyData; /* six-byte entity-to-fuser records */
+    u32 fuserNpcData;
+    u32 lilypadRails; /* three packed rail command pointers */
     u32 mapDataBase;      /* gAreaRoomMap_None — base of map/asset data section */
 
     /* Area data tables (pointer tables indexed by area ID) */
@@ -70,17 +77,10 @@ typedef struct {
     /* Tables the fat binary otherwise reaches through compiled USA data stubs
      * or literal 0x08xxxxxx addresses. 0 = unavailable for this region. */
     u32 extraFrameOffsets;  /* gExtraFrameOffsets (4352 bytes) */
-    u32 collisionMatrix;    /* gCollisionMtx */
-    u32 collisionShapePtrs; /* gUnk_0800823C — 40 packed pointers to 16-row u16 masks */
-    u32 tileTypeProperties; /* gUnk_08000360 — u16 per tile type */
     u32 figurines;          /* gFigurines — 137 × {pal, gfx, size, 0} */
-    u32 fuserEnemyData;     /* GetFuserData enemy key table (6-byte records) */
-    u32 fuserNpcData;       /* GetFuserData NPC key table */
     u32 fusionTextPtrs;     /* gUnk_08001A7C — 120 packed pointers */
-    u32 fuserFusionPtrs;    /* gUnk_08001DCC — 120 packed pointers (odd addresses legal) */
     u32 lakeHyliaEnemies;   /* Enemies_LakeHylia_Main EntityData list */
     u32 lakeHyliaCleared;   /* gUnk_080F3EA4 EntityData list */
-    u32 lilypadRails;       /* gLilypadRails — 3 packed pointers */
     u32 guardPatrolData;    /* gUnk_0810F6BC — packed pointers */
     u32 innWestEntities;    /* gUnk_080D6A74 — packed pointers */
     u32 innMiddleEntities;  /* gUnk_080D6B18 — packed pointers */

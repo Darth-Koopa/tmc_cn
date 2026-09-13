@@ -3,6 +3,8 @@
  */
 
 #include "entity.h"
+#include "port_config.h"
+#include "port_rom.h"
 #include "port_gba_mem.h"
 #include "port_types.h"
 #include "player.h"
@@ -56,7 +58,6 @@ extern u32 gRomSize;
 
 #define COL_MTX_ENTRY_SIZE 12
 #define COL_MTX_STRIDE 34
-#define COL_MTX_ROM_OFFSET 0x000B7B74u /* ROM offset of gCollisionMtx */
 #define COL_NUM_HANDLERS 23
 #define COL_RESULT_NONE 0
 #define COL_RESULT_COLLISION 1
@@ -98,7 +99,9 @@ static u32 PortCalcCollision(Entity* thisEntity, Entity* other) {
      * but the code reads far beyond it into adjacent ROM data for high
      * hitType values (e.g. deku seed hitType=0x68).  gRomData has all that
      * data at the correct offsets. */
-    u32 romOff = COL_MTX_ROM_OFFSET + byteOff;
+    if (!gRomOffsets)
+        return 0;
+    u32 romOff = gRomOffsets->collisionMatrix + byteOff;
     if (gRomData && romOff + COL_MTX_ENTRY_SIZE <= gRomSize) {
         u8* entry = &gRomData[romOff];
         settings = (PortColSettings*)entry;
@@ -246,10 +249,8 @@ u32 CalcCollisionStaticEntity(Entity* target, Entity* origin) {
 /* GetCollisionDataRelativeTo -- implemented in port_linked_stubs.c */
 /* GetFacingDirection -- implemented in port_linked_stubs.c */
 static u64 GetFuserData(Entity* entity) {
-    if (entity == NULL || (entity->kind != ENEMY && entity->kind != NPC)) {
-        return 0;
-    }
-    return Port_FindEntityFuserData(entity->kind == NPC, entity->id, entity->type, entity->type2);
+    if (entity == NULL) return 0;
+    return Port_GetEntityFuserData(entity->kind, entity->id, entity->type, entity->type2);
 }
 
 u32 GetFuserId(Entity* entity) {

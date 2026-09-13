@@ -1006,6 +1006,7 @@ void UpdateScrollVram(void) {
  * shadow pointers stay NULL (render falls back to clip-at-240). */
 static u16 sWsShadowBG1[MODE1_WS_SHADOW_ROWS * MODE1_WS_SHADOW_COLS];
 static u16 sWsShadowBG2[MODE1_WS_SHADOW_ROWS * MODE1_WS_SHADOW_COLS];
+static u16 sWsShadowOverlay[MODE1_WS_SHADOW_ROWS * MODE1_WS_SHADOW_COLS];
 
 /* ---- Runtime widescreen gate --------------------------------------------
  * `--widescreen_width=N` only reserves a wider framebuffer. True widescreen
@@ -1122,6 +1123,12 @@ int Port_Widescreen_FallbackNative(void) {
     }
     if (Port_Widescreen_TargetViewWidth() <= 240) {
         return 1; /* window is 3:2/4:3 — native view already fills it */
+    }
+    /* Rolling room transitions stream a 240px VRAM buffer while mapSpecial
+     * already contains the destination room. The iris uses an 8-bit WIN1.
+     * Keep these effects native until their camera/tilemap refresh completes. */
+    if (gRoomControls.scrollAction == 2 || gRoomControls.scrollAction == 4 || gRoomControls.scrollAction == 5) {
+        return 1;
     }
     eff = Port_WidescreenEffectiveTarget();
     if (eff <= 240) {
@@ -1247,8 +1254,8 @@ static void Port_WidescreenShadow_Populate(int bg_index, u16* mapSpecial, u16* s
      *       with map row (2*row16 - 1 + sr) — NOT (world_row & 31), which reads
      *       camera-shifted wrong rows.
      *   (b) the consumer base MUST equal the VRAM tile_col of the first reveal
-     *       column (display CLIP_X) = CLIP_X/8 + (BGHOFS>=8 ? 1 : 0), so
-     *       shadow_idx lands on reveal column index d. BGHOFS = (scroll-origin)
+     *       column (display CLIP_X), less one leading padding tile, so
+     *       shadow_idx lands on reveal column index d+1. BGHOFS = (scroll-origin)
      *       & 0xf (UpdateScreenShake); its upper half carries one extra tile.
      * Getting either wrong shifts/wraps the reveal into stale cells — the
      * far-edge garbage. (No residency gate: the area tileset is resident in
@@ -1260,15 +1267,17 @@ static void Port_WidescreenShadow_Populate(int bg_index, u16* mapSpecial, u16* s
     s32 row16 = ydiff >> 4;
     /* First reveal world tile col, continuing the native edge:
      * 2*col16 + CLIP/8 + (BGHOFS>=8) == (xdiff>>3) + CLIP/8. */
-    s32 ws_base_world_col = (xdiff >> 3) + (MODE1_GBA_BG_CLIP_X / 8);
-    virtuappu_mode1_ws_shadow_base_tile[bg_index] = (MODE1_GBA_BG_CLIP_X / 8) + (((xdiff & 0xf) >= 8) ? 1 : 0);
+    /* One leading tile covers negative screen shake at the reveal seam.
+     * The existing four spare columns still cover the trailing partial tile. */
+    s32 ws_base_world_col = (xdiff >> 3) + (MODE1_GBA_BG_CLIP_X / 8) - 1;
+    virtuappu_mode1_ws_shadow_base_tile[bg_index] = (MODE1_GBA_BG_CLIP_X / 8) + (((xdiff & 0xf) >= 8) ? 1 : 0) - 1;
 
     enum { kMapStride = 128, kMapRows = 128 };
     /* Clamp to the ROOM rect, not just the 128-tile buffer: the buffers are
      * reused across rooms without clearing, so cells past the current room's
      * extent hold the previous room's tiles — sampling them leaked stale
      * graphics into the reveal near room edges. Outside the room = entry 0
-     * (transparent; composite force-blacks it), same as GBA's void. */
+     * (transparent; the backdrop remains visible), same as GBA's void. */
     s32 room_tiles_w = (s32)gRoomControls.width / 8;
     s32 room_tiles_h = (s32)gRoomControls.height / 8;
     if (room_tiles_w > kMapStride)
@@ -1291,6 +1300,20 @@ static void Port_WidescreenShadow_Populate(int bg_index, u16* mapSpecial, u16* s
         }
     }
     virtuappu_mode1_ws_shadow[bg_index] = shadow;
+}
+
+/* Woods light rays/fog use a repeating 256px texture, not the room map.
+ * Copy its complete screenblock so even HBlank-varying scroll offsets use
+ * the same tiles on both sides of x=240. Existing CPU/GPU shadow sampling
+ * retains the overlay's scroll, wave distortion, priority and alpha blend. */
+static void Port_WidescreenShadow_PopulateOverlay(const u16* screen, u16* shadow) {
+    for (int row = 0; row < MODE1_WS_SHADOW_ROWS; ++row) {
+        for (int col = 0; col < MODE1_WS_SHADOW_COLS; ++col) {
+            shadow[row * MODE1_WS_SHADOW_COLS + col] = screen[row * 32 + (col & 31)];
+        }
+    }
+    virtuappu_mode1_ws_shadow_base_tile[3] = 0;
+    virtuappu_mode1_ws_shadow[3] = shadow;
 }
 
 /* Which PPU BG index renders a given map: the PPU selects a BG's tilemap by
@@ -1344,33 +1367,41 @@ void Port_Widescreen_UpdateShadows(void) {
     }
     virtuappu_mode1_ws_hud_right_anchor = Port_Widescreen_HudRightAnchor();
 
-    /* Publish the live textbox rect so the PPU can center it (BG0 composes
-     * the box for a 240-px canvas). The engine frame (DispMessageFrame /
-     * DeleteWindow, src/message.c) spans (W+2) x (H+2) BG0 tiles STARTING at
-     * tile (textWindowPosX, textWindowPosY) — border tiles are drawn inward
-     * from that corner, not around it. Publishing a rect short of the real
-     * frame left the right border outside the shifted copy (overdrawn by the
-     * interior) and the bottom border row outside the y-band (torn by the
-     * HUD right-anchor remap). Clamp to the native canvas. */
-    {
-        extern int Port_Message_WindowRect(int*, int*, int*, int*);
-        int x0, y0, x1, y1;
-        if ((gMessage.state & MESSAGE_ACTIVE) != 0 && Port_Message_WindowRect(&x0, &y0, &x1, &y1)) {
-            if (x0 < 0)
-                x0 = 0;
-            if (x1 > 240)
-                x1 = 240;
-            if (y0 < 0)
-                y0 = 0;
-            if (y1 > 160)
-                y1 = 160;
-            if (x1 > x0 && y1 > y0) {
-                virtuappu_mode1_ws_msg_x0 = x0;
-                virtuappu_mode1_ws_msg_x1 = x1;
-                virtuappu_mode1_ws_msg_y0 = y0;
-                virtuappu_mode1_ws_msg_y1 = y1;
-                virtuappu_mode1_ws_msg_shift = (Port_Widescreen_EffectiveViewWidth() - 240) / 2;
-            }
+    /* Use the window actually drawn into BG0: text tokens may move it,
+     * opening/closing animates its size, and gMessage can already describe
+     * the next pending message. Deleted windows must not remap HUD pixels. */
+    int x0, y0, width, height;
+    if (Message_GetWindowRect(&x0, &y0, &width, &height)) {
+        int x1 = x0 + width;
+        int y1 = y0 + height;
+        if (x0 < 0)
+            x0 = 0;
+        if (x1 > 240)
+            x1 = 240;
+        if (y0 < 0)
+            y0 = 0;
+        if (y1 > 160)
+            y1 = 160;
+        if (x1 > x0 && y1 > y0) {
+            virtuappu_mode1_ws_msg_x0 = x0;
+            virtuappu_mode1_ws_msg_x1 = x1;
+            virtuappu_mode1_ws_msg_y0 = y0;
+            virtuappu_mode1_ws_msg_y1 = y1;
+            virtuappu_mode1_ws_msg_shift = (Port_Widescreen_EffectiveViewWidth() - 240) / 2;
+        }
+    } else {
+        /* Location banners occupy BG0 rows 5 and 6 but do not set
+         * MESSAGE_ACTIVE. Without a published band, the HUD anchor tears
+         * off any glyphs at x >= 176 and moves them to the right edge.
+         * The banner manager lives in list 8 and clears these rows when
+         * it is deleted; use its live state rather than a persistent flag. */
+        Entity* banner = FindEntityByID(MANAGER, ENTER_ROOM_TEXTBOX_MANAGER, 8);
+        if (banner != NULL && banner->action != 0) {
+            virtuappu_mode1_ws_msg_x0 = 0;
+            virtuappu_mode1_ws_msg_x1 = 240;
+            virtuappu_mode1_ws_msg_y0 = 40 - (gScreen.bg0.yOffset & 0x1ff);
+            virtuappu_mode1_ws_msg_y1 = 56 - (gScreen.bg0.yOffset & 0x1ff);
+            virtuappu_mode1_ws_msg_shift = (Port_Widescreen_EffectiveViewWidth() - 240) / 2;
         }
     }
 
@@ -1383,6 +1414,12 @@ void Port_Widescreen_UpdateShadows(void) {
         int bg = Port_WidescreenPpuBgForControl(gMapTop.bgSettings->control);
         if (bg >= 0)
             Port_WidescreenShadow_Populate(bg, gMapDataTopSpecial, sWsShadowBG2);
+    }
+    /* Only the Woods overlay's known repeating layout; fixed BG3 canvases
+     * elsewhere must retain their native clipping. */
+    if (gRoomControls.area == AREA_MINISH_WOODS && gScreen.bg3.control == 0x1e04 &&
+        (gScreen.lcd.displayControl & DISPCNT_BG3_ON) && virtuappu_mode1_ws_shadow[3] == NULL) {
+        Port_WidescreenShadow_PopulateOverlay((const u16*)(gVram + 0xf000), sWsShadowOverlay);
     }
 }
 #else

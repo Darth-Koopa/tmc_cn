@@ -289,10 +289,17 @@ static void DrawRibbonDisplayTab(void) {
 #if defined(MODE1_GBA_WIDTH) && (MODE1_GBA_WIDTH > 240)
     {
         bool ws = Port_Config_WidescreenEnabled();
+
+        bool parity = Port_Config_GetConsoleParity();
+        ImGui::BeginDisabled(parity);
         if (ImGui::Checkbox("宽屏（试验中）", &ws)) {
             Port_Config_SetWidescreenEnabled(ws);
             Port_PPU_ApplyWindowScale();
             Port_DebugMenu_ToastFromExternal(ws ? "宽屏已启用" : "宽屏已禁用");
+        }
+        ImGui::EndDisabled();
+        if (parity && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Console-Parity mode requires the original screen width. Turn it off to enable widescreen.");
         }
         ImGui::SameLine();
     }
